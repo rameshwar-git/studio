@@ -1,9 +1,9 @@
+
 'use client';
 
 import * as React from 'react';
 import { Calendar } from '@/components/ui/calendar';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { BookingRequest } from '@/services/firestore';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import {
@@ -16,46 +16,44 @@ import {
   subMonths,
   setHours,
   setMinutes,
-  isWithinInterval,
   addHours
 } from 'date-fns';
+import { useToast } from '@/hooks/use-toast'; // Import useToast
 
 interface VenueCalendarProps {
   bookings: BookingRequest[];
   currentMonth: Date;
   onMonthChange: (newMonth: Date) => void;
+  onDateSelect?: (date: Date) => void; // Callback for date selection
+  selectedDate?: Date; // To highlight the selected date
 }
 
 // Define standard operational hours and booking duration
 const OPERATIONAL_START_HOUR = 9; // 9 AM
-const OPERATIONAL_END_HOUR = 17; // 5 PM (bookings can end at 5 PM, so last start is 4 PM for 1hr)
+const OPERATIONAL_END_HOUR = 17; // 5 PM
 const BOOKING_DURATION_HOURS = 1;
 const GAP_DURATION_HOURS = 1; // 1-hour gap
 
-// Generate all possible 1-hour start slots within operational hours
 const getAllPossibleSlots = () => {
   const slots = [];
   for (let hour = OPERATIONAL_START_HOUR; hour < OPERATIONAL_END_HOUR; hour++) {
-    // Bookings are 1 hour, so a booking starting at hour X ends at X+1
-    // Last possible start time is OPERATIONAL_END_HOUR - BOOKING_DURATION_HOURS
     slots.push({ start: hour, end: hour + BOOKING_DURATION_HOURS });
   }
   return slots;
 };
 const ALL_POSSIBLE_SLOTS = getAllPossibleSlots();
 
-// Get unique hall names from bookings (in a real app, this might come from a predefined list)
 const getUniqueHalls = (bookings: BookingRequest[]): string[] => {
     const halls = new Set(bookings.map(b => b.hallPreference));
-    // Add some default halls if none are in bookings, for demo purposes
     if (halls.size === 0) {
-        return ["Main Hall", "Seminar Room A", "Conference Room B"];
+        return ["Main Hall", "Seminar Room A", "Conference Room B"]; // Default halls
     }
     return Array.from(halls);
 };
 
 
-export function VenueCalendar({ bookings, currentMonth, onMonthChange }: VenueCalendarProps) {
+export function VenueCalendar({ bookings, currentMonth, onMonthChange, onDateSelect, selectedDate }: VenueCalendarProps) {
+  const { toast } = useToast(); // Initialize toast
   const [dayStatus, setDayStatus] = React.useState<Record<string, 'available' | 'fully-booked'>>({});
 
   React.useEffect(() => {
@@ -65,7 +63,7 @@ export function VenueCalendar({ bookings, currentMonth, onMonthChange }: VenueCa
     const newDayStatus: Record<string, 'available' | 'fully-booked'> = {};
     
     const ALL_HALLS = getUniqueHalls(bookings);
-    if (ALL_HALLS.length === 0) { // If no halls, all days are 'available' (or undefined by default)
+    if (ALL_HALLS.length === 0) { 
         daysInMonth.forEach(day => {
             newDayStatus[format(day, 'yyyy-MM-dd')] = 'available';
         });
@@ -80,12 +78,11 @@ export function VenueCalendar({ bookings, currentMonth, onMonthChange }: VenueCa
         const bookingsForHallOnDay = bookings.filter(
           b => isSameDay(b.startTimeDate || b.date, day) && b.hallPreference === hall && (b.status === 'approved' || b.status === 'pending'))
         .map(b => {
-            // Ensure startTimeDate and endTimeDate are actual Date objects
             let sd, ed;
             if (b.startTimeDate && b.endTimeDate) {
                 sd = b.startTimeDate;
                 ed = b.endTimeDate;
-            } else { // Fallback if precise timestamps weren't stored/retrieved (should not happen with current firestore.ts)
+            } else { 
                 const [sH, sM] = b.startTime.split(':').map(Number);
                 const [eH, eM] = b.endTime.split(':').map(Number);
                 sd = setMinutes(setHours(b.date, sH),sM);
@@ -101,12 +98,8 @@ export function VenueCalendar({ bookings, currentMonth, onMonthChange }: VenueCa
           
           let isSlotAvailable = true;
           for (const booking of bookingsForHallOnDay) {
-            // Effective booking interval including 1-hour gap on both sides
             const effectiveBookingStart = addHours(booking.start, -GAP_DURATION_HOURS);
             const effectiveBookingEnd = addHours(booking.end, GAP_DURATION_HOURS);
-
-            // Check if [slotStart, slotEnd) overlaps with [effectiveBookingStart, effectiveBookingEnd)
-            // Overlap if (slotStart < effectiveBookingEnd) and (slotEnd > effectiveBookingStart)
             if (slotStart < effectiveBookingEnd && slotEnd > effectiveBookingStart) {
               isSlotAvailable = false;
               break;
@@ -119,7 +112,7 @@ export function VenueCalendar({ bookings, currentMonth, onMonthChange }: VenueCa
         }
         
         if (hasAvailableSlotInThisHall) {
-          isDayFullyBookedForAllHalls = false; // Found an available slot in at least one hall
+          isDayFullyBookedForAllHalls = false; 
           break; 
         }
       }
@@ -128,14 +121,30 @@ export function VenueCalendar({ bookings, currentMonth, onMonthChange }: VenueCa
     setDayStatus(newDayStatus);
   }, [bookings, currentMonth]);
 
+  const handleDateSelect = (date: Date | undefined) => {
+    if (!date) return;
+    const dateKey = format(date, 'yyyy-MM-dd');
+    if (dayStatus[dateKey] === 'fully-booked') {
+      toast({
+        title: 'Fully Booked',
+        description: `No slots available on ${format(date, 'PPP')}. Please select another date.`,
+        variant: 'destructive',
+      });
+    } else if (onDateSelect) {
+      onDateSelect(date);
+    }
+  };
+
   const modifiers = {
     available: (date: Date) => dayStatus[format(date, 'yyyy-MM-dd')] === 'available',
     fullyBooked: (date: Date) => dayStatus[format(date, 'yyyy-MM-dd')] === 'fully-booked',
+    selected: selectedDate ? (date: Date) => isSameDay(date, selectedDate) : undefined,
   };
 
   const modifiersClassNames = {
     available: 'day-available',
     fullyBooked: 'day-fully-booked',
+    selected: 'day-selected-custom', // Custom class for selected date styling if needed
   };
 
   return (
@@ -144,6 +153,8 @@ export function VenueCalendar({ bookings, currentMonth, onMonthChange }: VenueCa
         mode="single"
         month={currentMonth}
         onMonthChange={onMonthChange}
+        selected={selectedDate} // Pass selectedDate to Calendar
+        onSelect={handleDateSelect} // Use internal handler
         modifiers={modifiers}
         modifiersClassNames={modifiersClassNames}
         components={{

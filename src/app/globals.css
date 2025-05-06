@@ -115,3 +115,11 @@ body {
 .day-fully-booked button:hover {
    background-color: #FECACA !important; /* Tailwind red-200 */
 }
+
+/* Custom style for selected date in VenueCalendar */
+.day-selected-custom button {
+  background-color: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+  border-color: hsl(var(--ring)) !important;
+  font-weight: bold;
+}

@@ -18,7 +18,7 @@ import { LogIn, Loader2, User, ListChecks, Hourglass, CheckSquare, XSquare, Info
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { format, parse } from 'date-fns';
+import { format } from 'date-fns';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 
@@ -41,6 +41,7 @@ export default function Home() {
   const [showBookingForm, setShowBookingForm] = React.useState(false);
   const [venueBookings, setVenueBookings] = React.useState<BookingRequest[]>([]);
   const [calendarMonth, setCalendarMonth] = React.useState(new Date());
+  const [selectedCalendarDate, setSelectedCalendarDate] = React.useState<Date | undefined>(undefined);
 
 
    React.useEffect(() => {
@@ -48,9 +49,10 @@ export default function Home() {
       if (user) {
         setProfileLoading(true);
         setBookingsLoading(true);
-        setShowBookingForm(false);
-        setBookingResult(null);
-        setError(null);
+        // Keep showBookingForm and selectedCalendarDate as they are, don't reset them here
+        // to allow calendar selection to persist or booking form to stay open if user reloads.
+        // setBookingResult(null); // Reset booking result if user changes
+        // setError(null);
         try {
           const profile = await getUserProfile(user.uid);
           setUserProfile(profile);
@@ -88,6 +90,7 @@ export default function Home() {
         setVenueBookings([]);
         setShowBookingForm(false);
         setBookingResult(null);
+        setSelectedCalendarDate(undefined);
         setError(null);
       }
     }
@@ -120,15 +123,11 @@ export default function Home() {
           const directorEmail = process.env.NEXT_PUBLIC_DIRECTOR_EMAIL || 'director@example.com';
           if (!directorEmail) {
              console.warn("Director email is not configured. Approval email not sent.");
-             // Not throwing error to allow booking to proceed, but log it.
           } else {
             await sendApprovalEmail(directorEmail, tokenValue, result.formData);
           }
         } else {
-           console.log("Booking auto-processed by AI (or does not require director approval):", result.formData, "Reason:", aiReasonForDecision);
-           // If not requiring director approval, it's saved as 'pending' but AI might suggest it's clear.
-           // The actual approval still happens via the director link or an admin panel.
-           // For this app, "auto-approved" means the AI didn't flag it for mandatory director review.
+           console.log("Booking auto-processed by AI:", result.formData, "Reason:", aiReasonForDecision);
         }
 
         setBookingResult({ ...result, bookingId, token: tokenValue });
@@ -139,7 +138,8 @@ export default function Home() {
             const updatedVenueBookings = await getVenueAvailabilityForMonth(calendarMonth.getFullYear(), calendarMonth.getMonth());
             setVenueBookings(updatedVenueBookings);
         }
-        setShowBookingForm(false);
+        setShowBookingForm(false); // Close form after successful submission
+        setSelectedCalendarDate(undefined); // Clear selected date
         setError(null);
 
       } catch (dbError: any) {
@@ -150,9 +150,8 @@ export default function Home() {
         setIsLoading(false);
       }
     } else {
-      // If there was an error message from BookingForm (e.g. availability)
       if (errorMsg) {
-        setError(errorMsg); // Display error from form.
+        setError(errorMsg); 
         toast({
             title: 'Booking Error',
             description: errorMsg,
@@ -177,7 +176,14 @@ export default function Home() {
     if (!timeString) return 'N/A';
     const [hours, minutes] = timeString.split(':');
     const tempDate = new Date(2000, 0, 1, parseInt(hours), parseInt(minutes));
-    return format(tempDate, 'p'); // e.g., 9:00 AM
+    return format(tempDate, 'p'); 
+  };
+
+  const handleCalendarDateSelect = (date: Date) => {
+    setSelectedCalendarDate(date);
+    setShowBookingForm(true); // Open the booking form
+    setBookingResult(null); // Clear any previous booking result
+    setError(null); // Clear any previous errors
   };
 
   const pendingBookings = userBookings.filter(b => b.status === 'pending');
@@ -258,13 +264,15 @@ export default function Home() {
                   <CardTitle className="flex items-center gap-2">
                      <CalendarDays className="h-6 w-6 text-primary" /> Venue Availability Calendar
                   </CardTitle>
-                  <CardDescription>Green indicates dates with some availability. Red indicates dates that are fully booked. Select a date on the calendar or use the form below.</CardDescription>
+                  <CardDescription>Green indicates dates with some availability. Red indicates dates that are fully booked. Select an available date on the calendar to open the booking form.</CardDescription>
               </CardHeader>
               <CardContent>
                   <VenueCalendar
                     bookings={venueBookings}
                     currentMonth={calendarMonth}
                     onMonthChange={setCalendarMonth}
+                    onDateSelect={handleCalendarDateSelect}
+                    selectedDate={selectedCalendarDate}
                   />
                   <p className="mt-2 text-xs text-muted-foreground">Note: Calendar shows general availability. Specific time slot conflicts are checked during booking.</p>
               </CardContent>
@@ -380,7 +388,7 @@ export default function Home() {
                 </CardHeader>
                 <CardContent>
                   <p className="text-muted-foreground">
-                    Click the "{userBookings.length === 0 ? "Make Your First Booking Request" : "Make a New Booking Request"}" button below to get started!
+                     Select a date from the calendar above or click the "Make a New Booking Request" button below to get started!
                   </p>
                 </CardContent>
               </Card>
@@ -388,11 +396,17 @@ export default function Home() {
           </div>
         )}
 
+        {/* "Make New Booking Request" / "Cancel" Button */}
         {!bookingResult && !error && !isLoading && (
             <div className="text-center mt-6">
                  <Button
                     onClick={() => {
                         setShowBookingForm(prev => !prev);
+                        if (!showBookingForm) { // If opening form
+                            setSelectedCalendarDate(undefined); // Clear selected date unless one is picked
+                        } else { // If closing form
+                            setSelectedCalendarDate(undefined);
+                        }
                         setBookingResult(null);
                         setError(null);
                     }}
@@ -403,7 +417,7 @@ export default function Home() {
                         <> <XSquare className="mr-2 h-4 w-4" /> Cancel New Booking</>
                     ) : (
                         <> <PlusCircle className="mr-2 h-4 w-4" />
-                         {userBookings.length === 0 ? "Make Your First Booking Request" : "Make a New Booking Request"}
+                         Make a New Booking Request
                         </>
                     )}
                 </Button>
@@ -414,7 +428,9 @@ export default function Home() {
           <Card className="mt-6">
             <CardHeader>
                 <CardTitle>New Hall Booking Request</CardTitle>
-                <CardDescription>Fill in the details below to book a hall. A 1-hour gap is maintained between bookings.</CardDescription>
+                <CardDescription>Fill in the details below to book a hall. A 1-hour gap is maintained between bookings.
+                    {selectedCalendarDate && ` Booking for: ${format(selectedCalendarDate, 'PPP')}`}
+                </CardDescription>
             </CardHeader>
             <CardContent>
                 <BookingForm
@@ -422,6 +438,7 @@ export default function Home() {
                     onLoadingChange={handleLoadingChange}
                     isLoading={isLoading}
                     userProfile={userProfile}
+                    preselectedDate={selectedCalendarDate} // Pass selected date
                 />
             </CardContent>
           </Card>
@@ -448,7 +465,7 @@ export default function Home() {
           </div>
         )}
 
-        {error && !isLoading && !bookingResult && ( // Only show general error if no specific booking result error shown in form
+        {error && !isLoading && !bookingResult && ( 
           <Alert variant="destructive" className="mt-6">
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle>Error</AlertTitle>
@@ -463,11 +480,12 @@ export default function Home() {
                 setBookingResult(null);
                 setError(null);
                 setShowBookingForm(false);
+                setSelectedCalendarDate(undefined);
                 }}
                 variant="outline"
                 className="w-full sm:w-auto"
             >
-                {showBookingForm && !bookingResult && !error ? 'Back to Summary & Calendar' : 'View Summary & Calendar'}
+                Back to Summary & Calendar
             </Button>
            </div>
         )}

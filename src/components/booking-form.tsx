@@ -40,7 +40,6 @@ const bookingFormSchema = z.object({
   startTime: z.string().min(1, { message: 'Start time is required.' }),
   endTime: z.string().min(1, { message: 'End time is required.' }),
 }).refine(data => {
-    // Basic check: end time must be after start time
     if (data.startTime && data.endTime) {
         const [startHour, startMinute] = data.startTime.split(':').map(Number);
         const [endHour, endMinute] = data.endTime.split(':').map(Number);
@@ -61,35 +60,33 @@ interface BookingFormProps {
   onLoadingChange: (isLoading: boolean) => void;
   isLoading: boolean;
   userProfile: UserProfileData | null;
+  preselectedDate?: Date; // New prop for preselected date
 }
 
-// Helper to generate time slots
 const generateTimeSlots = () => {
     const slots = [];
     const Tslots = [];
     const startHour = 9;
-    const endHour = 17; // 5 PM
+    const endHour = 17; 
     for (let hour = startHour; hour < endHour; hour++) {
         slots.push(`${String(hour).padStart(2, '0')}:00`);
         slots.push(`${String(hour).padStart(2, '0')}:30`);
     }
-    slots.push(`${String(endHour).padStart(2, '0')}:00`); // Add 5:00 PM as a possible end time
+    slots.push(`${String(endHour).padStart(2, '0')}:00`); 
 
-    // For end time, we need slots up to 5 PM. For start time, up to 4:30 PM.
-    // Assuming 1 hour booking slot minimum
     for (let hour = startHour; hour <= endHour; hour++) {
         Tslots.push(`${String(hour).padStart(2, '0')}:00`);
-        if (hour < endHour) { // Don't add 5:30 PM for example
+        if (hour < endHour) { 
           Tslots.push(`${String(hour).padStart(2, '0')}:30`);
         }
     }
 
-    return { startSlots: Tslots.slice(0, -1), endSlots: Tslots.slice(1) }; // start up to 4:30, end up to 5:00
+    return { startSlots: Tslots.slice(0, -1), endSlots: Tslots.slice(1) }; 
 };
 
 const { startSlots, endSlots } = generateTimeSlots();
 
-export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userProfile }: BookingFormProps) {
+export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userProfile, preselectedDate }: BookingFormProps) {
   const {toast} = useToast();
 
   const form = useForm<BookingFormData>({
@@ -98,7 +95,7 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
       studentName: userProfile?.name || '',
       studentEmail: userProfile?.email || '',
       hallPreference: '',
-      date: undefined,
+      date: preselectedDate || undefined,
       startTime: '',
       endTime: '',
     },
@@ -109,11 +106,11 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
        studentName: userProfile?.name || '',
        studentEmail: userProfile?.email || '',
        hallPreference: '',
-       date: undefined,
-       startTime: '',
+       date: preselectedDate || form.getValues('date') || undefined, // Use preselectedDate if available
+       startTime: '', // Reset times when date changes or form re-initializes
        endTime: '',
      });
-   }, [userProfile, form]);
+   }, [userProfile, preselectedDate, form]);
 
    const checkAvailability = async (hall: string, date: Date, startTime: string, endTime: string): Promise<boolean> => {
         const selectedDateStart = startOfDay(date);
@@ -123,35 +120,28 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
         const newBookingStart = setMinutes(setHours(selectedDateStart, startH), startM);
         const newBookingEnd = setMinutes(setHours(selectedDateStart, endH), endM);
 
-        // Fetch existing bookings for the hall on the selected date
         const existingBookings = await getHallBookingsForDate(hall, selectedDateStart);
 
         for (const booking of existingBookings) {
-            const existingStart = booking.startTimeDate!; // Should be populated by getHallBookingsForDate
-            const existingEnd = booking.endTimeDate!;   // Should be populated by getHallBookingsForDate
+            const existingStart = booking.startTimeDate!; 
+            const existingEnd = booking.endTimeDate!;   
 
-            // Conflict if new booking overlaps with (existing booking +/- 1 hour gap)
-            // New booking [S_new, E_new]
-            // Existing booking effective range [S_exist - 1hr, E_exist + 1hr]
             const existingRangeStart = addHours(existingStart, -1);
             const existingRangeEnd = addHours(existingEnd, 1);
 
-            // Check for overlap:
-            // (StartA < EndB) and (EndA > StartB)
             if (isBefore(newBookingStart, existingRangeEnd) && isBefore(existingRangeStart, newBookingEnd)) {
-                 // More precise check: If new start is within 1 hour of existing end OR new end is within 1 hour of existing start
                 if (isBefore(newBookingStart, addHours(existingEnd,1)) && isBefore(addHours(existingStart, -1), newBookingEnd)) {
-                    return false; // Conflict
+                    return false; 
                 }
             }
         }
-        return true; // No conflicts
+        return true; 
     };
 
 
   async function onSubmit(data: BookingFormData) {
     onLoadingChange(true);
-    setError(null); // Clear previous errors
+    setError(null); 
     try {
       const isAvailable = await checkAvailability(data.hallPreference, data.date, data.startTime, data.endTime);
       if (!isAvailable) {
@@ -160,17 +150,17 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
         return;
       }
 
-      const studentHistory = 'No major issues reported.'; // Simulated
-      const hallAvailability = 'Hall availability data is complex and dynamic.'; // Simulated for AI context
+      const studentHistory = 'No major issues reported.'; 
+      const hallAvailability = 'Hall availability data is complex and dynamic.'; 
 
       const aiInput = {
-        studentId: data.studentEmail, // Using email as studentId for AI
+        studentId: data.studentEmail, 
         hallPreference: data.hallPreference,
-        dates: format(data.date, 'PPP'), // Format date to string for AI
+        dates: format(data.date, 'PPP'), 
         startTime: data.startTime,
         endTime: data.endTime,
         studentHistory: studentHistory,
-        hallAvailability: hallAvailability, // This could be a summary or specific status
+        hallAvailability: hallAvailability, 
       };
 
       const authorizationResult = await authorizeBooking(aiInput);
@@ -180,7 +170,14 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
         title: 'Booking Submitted',
         description: 'Your booking request has been processed.',
       });
-      // Form will be hidden by parent or reset if user makes another booking
+      form.reset({ // Reset form after successful submission
+          studentName: userProfile?.name || '',
+          studentEmail: userProfile?.email || '',
+          hallPreference: '',
+          date: undefined, // Clear date
+          startTime: '',
+          endTime: '',
+      });
     } catch (error) {
        console.error('Booking submission error:', error);
        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred.';
@@ -266,21 +263,29 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
                         'w-full pl-3 text-left font-normal',
                         !field.value && 'text-muted-foreground'
                       )}
+                       disabled={!!preselectedDate} // Disable if date is preselected from calendar
                     >
                       {field.value ? format(field.value, 'PPP') : <span>Pick a date</span>}
                       <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                     </Button>
                   </FormControl>
                 </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={field.value}
-                    onSelect={field.onChange}
-                    disabled={(date) => date < startOfDay(new Date())} // Disable past dates
-                    initialFocus
-                  />
-                </PopoverContent>
+                 {!preselectedDate && ( // Only show popover if date is not preselected
+                    <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                        mode="single"
+                        selected={field.value}
+                        onSelect={(date) => {
+                            field.onChange(date);
+                            // Reset time fields when date changes manually
+                            form.setValue('startTime', '');
+                            form.setValue('endTime', '');
+                        }}
+                        disabled={(date) => date < startOfDay(new Date())} 
+                        initialFocus
+                    />
+                    </PopoverContent>
+                 )}
               </Popover>
               <FormDescription>Select the date for your booking.</FormDescription>
               <FormMessage />
@@ -294,7 +299,14 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
                 render={({ field }) => (
                 <FormItem>
                     <FormLabel className="flex items-center gap-2"><Clock className="h-4 w-4 text-muted-foreground" /> Start Time</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select 
+                        onValueChange={(value) => {
+                            field.onChange(value);
+                            form.setValue('endTime', ''); // Reset end time when start time changes
+                        }} 
+                        value={field.value} // Use value instead of defaultValue for controlled component
+                        disabled={!form.watch('date')} // Disable if date not selected
+                    >
                     <FormControl>
                         <SelectTrigger>
                         <SelectValue placeholder="Select start time" />
@@ -316,8 +328,10 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
                 render={({ field }) => (
                 <FormItem>
                     <FormLabel className="flex items-center gap-2"><Clock className="h-4 w-4 text-muted-foreground" /> End Time</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}
-                        disabled={!form.watch('startTime')} // Disable if start time not selected
+                    <Select 
+                        onValueChange={field.onChange} 
+                        value={field.value} // Use value
+                        disabled={!form.watch('startTime')} 
                     >
                     <FormControl>
                         <SelectTrigger>
@@ -328,10 +342,9 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
                         {endSlots
                         .filter(time => {
                             const selectedStartTime = form.watch('startTime');
-                            if (!selectedStartTime) return true; // Show all if start time not selected
+                            if (!selectedStartTime) return true; 
                             const [startH, startM] = selectedStartTime.split(':').map(Number);
                             const [currentEndH, currentEndM] = time.split(':').map(Number);
-                            // End time must be at least 30 mins after start time
                             return currentEndH > startH || (currentEndH === startH && currentEndM > startM);
                         })
                         .map(time => (
@@ -346,7 +359,7 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
             />
         </div>
          {error && <p className="text-sm font-medium text-destructive">{error}</p>}
-        <Button type="submit" disabled={isLoading} className="w-full bg-accent text-accent-foreground hover:bg-accent/90">
+        <Button type="submit" disabled={isLoading || !form.watch('date')} className="w-full bg-accent text-accent-foreground hover:bg-accent/90">
           {isLoading ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Submitting...
