@@ -41,13 +41,12 @@ import { saveUserProfile, type UserProfileData } from '@/services/firestore'; //
 
 // Define available departments
 const departments = [
-  'Computer Science',
-  'Electrical Engineering',
-  'Mechanical Engineering',
-  'Civil Engineering',
-  'Arts & Humanities',
-  'Business Administration',
-  'Life Sciences',
+  'MCA',
+  'PGDM',
+  'B.Tech',
+  'MBA',
+  // 'MCA', // Removed duplicate MCA
+  'LAW',
   'Other', // Add an 'Other' option
 ];
 
@@ -120,7 +119,7 @@ export default function RegistrationPage() {
          case 'auth/network-request-failed':
               errorMessage = 'Network error. Please check your connection and try again.';
               break;
-         case 'auth/requests-to-this-api-identitytoolkit-method-google.cloud.identitytoolkit.v1.authenticationservice.signup-are-blocked':
+         case 'auth/requests-to-this-api-identitytoolkit-method-google.cloud.identitytoolkit.v1.authenticationservice.signupnewuser-are-blocked': // Corrected error code for signup
               errorMessage = 'Registration is currently disabled. Please ensure "Identity Toolkit API" is enabled in your Google Cloud Project and "Email/Password" sign-in is enabled in Firebase Authentication settings.';
               break;
          case 'auth/api-key-not-valid':
@@ -284,3 +283,4 @@ export default function RegistrationPage() {
     </main>
   );
 }
+
