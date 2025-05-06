@@ -79,8 +79,17 @@ export default function LoginPage() {
         case 'auth/network-request-failed':
              errorMessage = 'Network error. Please check your connection and try again.';
              break;
+        case 'auth/requests-to-this-api-identitytoolkit-method-google.cloud.identitytoolkit.v1.authenticationservice.signinwithpassword-are-blocked':
+            errorMessage = 'Login is currently disabled. Please ensure "Identity Toolkit API" is enabled in your Google Cloud Project and "Email/Password" sign-in is enabled in Firebase Authentication settings.';
+            break;
+        case 'auth/api-key-not-valid':
+             errorMessage = 'Firebase API Key is not valid. Please check your environment configuration.';
+             break;
         default:
            // Use the default message for other errors
+            if (error.message && error.message.toLowerCase().includes("api key not valid")) {
+                errorMessage = 'Firebase API Key is not valid. Please check your environment configuration.';
+            }
            break;
       }
       toast({

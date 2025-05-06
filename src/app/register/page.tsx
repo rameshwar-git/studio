@@ -120,10 +120,18 @@ export default function RegistrationPage() {
          case 'auth/network-request-failed':
               errorMessage = 'Network error. Please check your connection and try again.';
               break;
+         case 'auth/requests-to-this-api-identitytoolkit-method-google.cloud.identitytoolkit.v1.authenticationservice.signup-are-blocked':
+              errorMessage = 'Registration is currently disabled. Please ensure "Identity Toolkit API" is enabled in your Google Cloud Project and "Email/Password" sign-in is enabled in Firebase Authentication settings.';
+              break;
+         case 'auth/api-key-not-valid':
+              errorMessage = 'Firebase API Key is not valid. Please check your environment configuration.';
+              break;
          default:
             // Check if it's a Firestore error during profile saving
-            if (error.message.includes('Failed to save user profile')) {
+            if (error.message && error.message.includes('Failed to save user profile')) {
                 errorMessage = 'Account created, but failed to save profile details. Please contact support.';
+            } else if (error.message && error.message.toLowerCase().includes("api key not valid")) {
+                errorMessage = 'Firebase API Key is not valid. Please check your environment configuration.';
             }
             // Otherwise, use the default message
             break;
