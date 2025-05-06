@@ -1,3 +1,4 @@
+
 'use server';
 /**
  * @fileOverview Placeholder email service. In a real app, integrate with an email provider like SendGrid or Mailgun.
@@ -12,10 +13,10 @@ import { format as formatDateFn, parse } from 'date-fns'; // Renamed to avoid co
  * @param token - The unique authorization token.
  * @param bookingDetails - The details of the booking request.
  */
-export async function sendApprovalEmail(to: string, token: string, bookingDetails: BookingFormData): Promise&lt;void&gt; {
+export async function sendApprovalEmail(to: string, token: string, bookingDetails: BookingFormData): Promise<void> {
   const approvalLink = `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'}/approve/${token}`; // Ensure you have BASE_URL in your env
 
-  const formatTime = (timeString: string) =&gt; {
+  const formatTime = (timeString: string) => {
     if (!timeString) return 'N/A';
     const [hours, minutes] = timeString.split(':');
     const tempDate = new Date(2000, 0, 1, parseInt(hours), parseInt(minutes));
@@ -24,17 +25,17 @@ export async function sendApprovalEmail(to: string, token: string, bookingDetail
 
   const emailSubject = `Booking Request Approval Needed: ${bookingDetails.studentEmail} - ${bookingDetails.hallPreference}`;
   const emailBody = `
-    &lt;p&gt;A new hall booking request requires your approval:&lt;/p&gt;
-    &lt;ul&gt;
-      &lt;li&gt;&lt;strong&gt;Student Name:&lt;/strong&gt; ${bookingDetails.studentName}&lt;/li&gt;
-      &lt;li&gt;&lt;strong&gt;Student Email:&lt;/strong&gt; ${bookingDetails.studentEmail}&lt;/li&gt;
-      &lt;li&gt;&lt;strong&gt;Hall Preference:&lt;/strong&gt; ${bookingDetails.hallPreference}&lt;/li&gt;
-      &lt;li&gt;&lt;strong&gt;Date:&lt;/strong&gt; ${formatDateFn(bookingDetails.date, 'PPP')}&lt;/li&gt;
-      &lt;li&gt;&lt;strong&gt;Time:&lt;/strong&gt; ${formatTime(bookingDetails.startTime)} - ${formatTime(bookingDetails.endTime)}&lt;/li&gt;
-    &lt;/ul&gt;
-    &lt;p&gt;Please review the request and approve or reject it by clicking the link below:&lt;/p&gt;
-    &lt;p&gt;&lt;a href="${approvalLink}"&gt;Review Booking Request&lt;/a&gt;&lt;/p&gt;
-    &lt;p&gt;Link: ${approvalLink}&lt;/p&gt;
+    <p>A new hall booking request requires your approval:</p>
+    <ul>
+      <li><strong>Student Name:</strong> ${bookingDetails.studentName}</li>
+      <li><strong>Student Email:</strong> ${bookingDetails.studentEmail}</li>
+      <li><strong>Hall Preference:</strong> ${bookingDetails.hallPreference}</li>
+      <li><strong>Date:</strong> ${formatDateFn(bookingDetails.date, 'PPP')}</li>
+      <li><strong>Time:</strong> ${formatTime(bookingDetails.startTime)} - ${formatTime(bookingDetails.endTime)}</li>
+    </ul>
+    <p>Please review the request and approve or reject it by clicking the link below:</p>
+    <p><a href="${approvalLink}">Review Booking Request</a></p>
+    <p>Link: ${approvalLink}</p>
   `;
 
   console.log("--- SIMULATING EMAIL ---");
@@ -42,7 +43,7 @@ export async function sendApprovalEmail(to: string, token: string, bookingDetail
   console.log("Subject:", emailSubject);
   console.log("Body:", emailBody);
   console.log("--- END SIMULATING EMAIL ---");
-  await new Promise(resolve =&gt; setTimeout(resolve, 500)); 
+  await new Promise(resolve => setTimeout(resolve, 500));
 }
 
 /**
@@ -52,8 +53,8 @@ export async function sendApprovalEmail(to: string, token: string, bookingDetail
  * @param bookingDetails - The details of the booking request.
  * @param reason - Optional reason for rejection.
  */
-export async function sendConfirmationEmail(to: string, status: 'approved' | 'rejected', bookingDetails: BookingFormData, reason?: string): Promise&lt;void&gt; {
-    const formatTime = (timeString: string) =&gt; {
+export async function sendConfirmationEmail(to: string, status: 'approved' | 'rejected', bookingDetails: BookingFormData, reason?: string): Promise<void> {
+    const formatTime = (timeString: string) => {
         if (!timeString) return 'N/A';
         const [hours, minutes] = timeString.split(':');
         const tempDate = new Date(2000, 0, 1, parseInt(hours), parseInt(minutes));
@@ -62,21 +63,21 @@ export async function sendConfirmationEmail(to: string, status: 'approved' | 're
     
     const emailSubject = `Booking Request Update: ${bookingDetails.hallPreference} on ${formatDateFn(bookingDetails.date, 'PPP')}`;
     let emailBody = `
-      &lt;p&gt;Your hall booking request for &lt;strong&gt;${bookingDetails.hallPreference}&lt;/strong&gt; has been updated:&lt;/p&gt;
-      &lt;ul&gt;
-        &lt;li&gt;&lt;strong&gt;Student Name:&lt;/strong&gt; ${bookingDetails.studentName}&lt;/li&gt;
-        &lt;li&gt;&lt;strong&gt;Student Email:&lt;/strong&gt; ${bookingDetails.studentEmail}&lt;/li&gt;
-        &lt;li&gt;&lt;strong&gt;Hall Preference:&lt;/strong&gt; ${bookingDetails.hallPreference}&lt;/li&gt;
-        &lt;li&gt;&lt;strong&gt;Date:&lt;/strong&gt; ${formatDateFn(bookingDetails.date, 'PPP')}&lt;/li&gt;
-        &lt;li&gt;&lt;strong&gt;Time:&lt;/strong&gt; ${formatTime(bookingDetails.startTime)} - ${formatTime(bookingDetails.endTime)}&lt;/li&gt;
-        &lt;li&gt;&lt;strong&gt;Status:&lt;/strong&gt; ${status === 'approved' ? 'Approved' : 'Rejected'}&lt;/li&gt;
-      &lt;/ul&gt;
+      <p>Your hall booking request for <strong>${bookingDetails.hallPreference}</strong> has been updated:</p>
+      <ul>
+        <li><strong>Student Name:</strong> ${bookingDetails.studentName}</li>
+        <li><strong>Student Email:</strong> ${bookingDetails.studentEmail}</li>
+        <li><strong>Hall Preference:</strong> ${bookingDetails.hallPreference}</li>
+        <li><strong>Date:</strong> ${formatDateFn(bookingDetails.date, 'PPP')}</li>
+        <li><strong>Time:</strong> ${formatTime(bookingDetails.startTime)} - ${formatTime(bookingDetails.endTime)}</li>
+        <li><strong>Status:</strong> ${status === 'approved' ? 'Approved' : 'Rejected'}</li>
+      </ul>
     `;
 
-    if (status === 'rejected' &amp;&amp; reason) {
-        emailBody += `&lt;p&gt;&lt;strong&gt;Reason for Rejection:&lt;/strong&gt; ${reason}&lt;/p&gt;`;
+    if (status === 'rejected' && reason) {
+        emailBody += `<p><strong>Reason for Rejection:</strong> ${reason}</p>`;
     } else if (status === 'approved') {
-         emailBody += `&lt;p&gt;Your booking is confirmed. Please contact the administration for any further details.&lt;/p&gt;`;
+         emailBody += `<p>Your booking is confirmed. Please contact the administration for any further details.</p>`;
     }
 
 
@@ -86,5 +87,6 @@ export async function sendConfirmationEmail(to: string, status: 'approved' | 're
     console.log("Body:", emailBody);
     console.log("--- END SIMULATING STUDENT CONFIRMATION EMAIL ---");
 
-     await new Promise(resolve =&gt; setTimeout(resolve, 500)); 
+     await new Promise(resolve => setTimeout(resolve, 500));
 }
+
