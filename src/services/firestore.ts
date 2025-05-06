@@ -1,4 +1,3 @@
-
 'use server';
 /**
  * @fileOverview Firebase service functions for managing booking (Firestore) and user profile data (Realtime Database).
@@ -35,6 +34,7 @@ export interface UserProfileData {
 const PENDING_BOOKINGS_COLLECTION = 'pendingBookings';
 const USERS_RTDB_PATH = 'users';
 const HALL_BOOKINGS_RTDB_PATH = 'hallBookings'; // Path for hall bookings in Realtime Database
+const DATA_FETCH_FAILURES_RTDB_PATH = 'dataFetchFailures/hallBookingsForDate';
 
 
 export async function saveUserProfile(userId: string, profileData: Omit<UserProfileData, 'createdAt'>): Promise<void> {
@@ -288,7 +288,7 @@ export async function getUserBookings(userId: string): Promise<BookingRequest[]>
 
 /**
  * Retrieves all bookings for a specific hall on a specific date from Firestore.
- * This is used to check for time conflicts.
+ * If retrieval fails, it logs a failure entry to Firebase Realtime Database.
  * @param hallPreference - The name of the hall.
  * @param date - The specific date (JS Date object, time part will be ignored for date range).
  * @returns An array of booking requests for that hall and date.
@@ -311,8 +311,25 @@ export async function getHallBookingsForDate(hallPreference: string, date: Date)
     console.log(`Found ${bookings.length} Firestore bookings for hall '${hallPreference}' on ${format(date, 'PPP')}`);
     return bookings;
   } catch (e: any) {
-    console.error(`Error getting bookings for hall ${hallPreference} on date ${date}: `, e);
-    throw new Error(`Failed to retrieve hall bookings for date: ${e.message || 'Unknown error'}`);
+    const errorMessage = e instanceof Error ? e.message : 'Unknown error';
+    console.error(`Error getting bookings for hall ${hallPreference} on date ${date}: `, errorMessage);
+    
+    // Log failure to Realtime Database
+    try {
+      const dateString = format(date, 'yyyy-MM-dd');
+      const failureLogRef = rtdbRef(realtimeDB, `${DATA_FETCH_FAILURES_RTDB_PATH}/${hallPreference}/${dateString}`);
+      await setRealtimeDB(failureLogRef, {
+        hallPreference: hallPreference,
+        date: dateString,
+        error: errorMessage,
+        timestamp: realtimeServerTimestamp(),
+      });
+      console.log(`Logged Firestore fetch failure to Realtime Database for hall '${hallPreference}' on ${dateString}`);
+    } catch (logError: any) {
+      console.error(`Failed to log Firestore fetch failure to Realtime Database: `, logError);
+    }
+    // Re-throw original error after attempting to log
+    throw new Error(`Failed to retrieve hall bookings for date: ${errorMessage}`);
   }
 }
 
