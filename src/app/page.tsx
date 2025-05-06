@@ -1,3 +1,4 @@
+
 'use client';
 
 import * as React from 'react';
@@ -7,11 +8,12 @@ import {BookingForm} from '@/components/booking-form';
 import {BookingConfirmation} from '@/components/booking-confirmation';
 import type {AuthorizeBookingOutput} from '@/ai/flows/authorize-booking';
 import { savePendingBooking, getUserProfile, type UserProfileData, getUserBookings, type BookingRequest } from '@/services/firestore';
+import { auth } from '@/lib/firebase'; // Corrected import for auth
 import { sendApprovalEmail } from '@/services/email'; 
 import crypto from 'crypto'; 
 import { useAuth } from '@/context/AuthContext'; 
 import { Button } from '@/components/ui/button'; 
-import { LogIn, Loader2, User, ListChecks, Hourglass, CheckSquare, XSquare, Info, PlusCircle } from 'lucide-react';
+import { LogIn, Loader2, User, ListChecks, Hourglass, CheckSquare, XSquare, Info, PlusCircle, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -49,14 +51,25 @@ export default function Home() {
         try {
           const profile = await getUserProfile(user.uid);
           setUserProfile(profile);
+          // If profile is null, it means it wasn't found. This is not necessarily an error to throw,
+          // but the UI should handle it (e.g. prompt to create profile or show limited functionality).
+          // For now, we'll let it proceed and the UI can check if userProfile is null.
+
           const bookings = await getUserBookings(user.uid);
           setUserBookings(bookings);
-        } catch (err) {
+
+        } catch (err: any) {
           console.error("Failed to fetch user data:", err);
-          setError("Could not load your profile or booking information.");
+          let specificError = "Could not load your information at this time.";
+          if (err.message && err.message.toLowerCase().includes('profile')) {
+            specificError = "Could not load your profile. It might not exist or there was a connection issue.";
+          } else if (err.message && err.message.toLowerCase().includes('bookings')) {
+            specificError = "Could not load your booking information due to a connection issue.";
+          }
+          setError(specificError);
           toast({
-            title: 'Error',
-            description: 'Could not load your profile or booking information.',
+            title: 'Data Loading Error',
+            description: specificError,
             variant: 'destructive',
           });
         } finally {
@@ -148,7 +161,7 @@ export default function Home() {
   const approvedBookings = userBookings.filter(b => b.status === 'approved');
   const rejectedBookings = userBookings.filter(b => b.status === 'rejected');
 
-   if (authLoading || (user && (profileLoading || bookingsLoading))) {
+   if (authLoading || (user && (profileLoading || bookingsLoading) && !error)) { // Only show full page loader if no specific error
     return (
        <main className="container mx-auto flex min-h-screen flex-col items-center justify-center p-4 md:p-8">
         <div className="flex flex-col items-center space-y-2">
@@ -189,9 +202,10 @@ export default function Home() {
       <Button
           variant="outline"
           onClick={async () => {
-            await auth.signOut();
-            // No need to manually clear state here, useEffect dependency on 'user' handles it.
-            toast({ title: 'Logged Out', description: 'You have been successfully logged out.' });
+            if (auth) { // Ensure auth is available
+              await auth.signOut();
+              toast({ title: 'Logged Out', description: 'You have been successfully logged out.' });
+            }
           }}
           className="absolute right-4 top-4"
         >
@@ -199,15 +213,25 @@ export default function Home() {
         </Button>
 
       <div className="w-full max-w-3xl space-y-8">
-        {userProfile && (
+        {userProfile && !profileLoading && ( // Only show if profile is loaded and exists
             <div className="text-center">
                 <h1 className="text-3xl font-bold text-primary">Welcome, {userProfile.name}!</h1>
                 <p className="text-muted-foreground">{userProfile.department}</p>
             </div>
         )}
+        {!userProfile && !profileLoading && !error && ( // If profile not found, but no general error
+            <Alert variant="default" className="mt-4 bg-blue-50 border-blue-300">
+                <Info className="h-4 w-4 text-blue-600"/>
+                <AlertTitle className="text-blue-700">Profile Information</AlertTitle>
+                <AlertDescription className="text-blue-600">
+                    Your user profile could not be loaded. If you just registered, it might still be syncing. Otherwise, please contact support if this persists.
+                </AlertDescription>
+            </Alert>
+        )}
+
 
         {/* Booking Summary Card - always show if user is logged in and not in a form/result state */}
-        {!showBookingForm && !bookingResult && !error && !isLoading && (
+        {!showBookingForm && !bookingResult && !error && !isLoading && !bookingsLoading && (
           <Card>
               <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -232,8 +256,8 @@ export default function Home() {
           </Card>
         )}
 
-        {/* Booking History Sections - show if not in form/result state */}
-        { (userBookings.length > 0) && !showBookingForm && !bookingResult && !error && !isLoading && (
+        {/* Booking History Sections - show if not in form/result state and bookings loaded */}
+        { (userBookings.length > 0) && !showBookingForm && !bookingResult && !error && !isLoading && !bookingsLoading && (
              <div className="space-y-6">
                 {pendingBookings.length > 0 && (
                     <Card>
@@ -362,11 +386,11 @@ export default function Home() {
           </div>
         )}
 
-        {error && !isLoading && ( // Show error message
+        {error && !isLoading && ( // Show specific error message if set, general one otherwise
           <Alert variant="destructive" className="mt-6">
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle>Error</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{error || 'An unexpected error occurred. Please try again.'}</AlertDescription>
           </Alert>
         )}
 
@@ -390,4 +414,3 @@ export default function Home() {
     </main>
   );
 }
-

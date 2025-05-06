@@ -1,3 +1,4 @@
+
 'use server';
 /**
  * @fileOverview Firestore service functions for managing booking and user profile data.
@@ -41,9 +42,9 @@ export async function saveUserProfile(userId: string, profileData: UserProfileDa
         createdAt: serverTimestamp(), // Add a timestamp for creation date
     });
     console.log("User profile saved for user ID: ", userId);
-  } catch (e) {
+  } catch (e: any) {
     console.error("Error saving user profile: ", e);
-    throw new Error("Failed to save user profile.");
+    throw new Error(`Failed to save user profile: ${e.message || 'Unknown error'}`);
   }
 }
 
@@ -69,9 +70,9 @@ export async function savePendingBooking(bookingDetails: BookingFormData, token:
     });
     console.log("Pending booking saved with ID: ", docRef.id);
     return docRef.id;
-  } catch (e) {
+  } catch (e: any) {
     console.error("Error adding document: ", e);
-    throw new Error("Failed to save pending booking request.");
+    throw new Error(`Failed to save pending booking request: ${e.message || 'Unknown error'}`);
   }
 }
 
@@ -111,9 +112,9 @@ export async function getBookingByToken(token: string): Promise<BookingRequest |
     };
      console.log("Booking found for token:", token, bookingData);
     return bookingData;
-  } catch (e) {
+  } catch (e: any) {
     console.error("Error getting booking by token: ", e);
-    throw new Error("Failed to retrieve booking request.");
+    throw new Error(`Failed to retrieve booking request: ${e.message || 'Unknown error'}`);
   }
 }
 
@@ -139,9 +140,9 @@ export async function updateBookingStatus(bookingId: string, newStatus: 'approve
 
     await updateDoc(bookingRef, updateData as any); // Using 'as any' due to complex type with serverTimestamp and undefined
     console.log(`Booking ${bookingId} status updated to ${newStatus}`);
-  } catch (e) {
+  } catch (e: any) {
     console.error("Error updating booking status: ", e);
-    throw new Error("Failed to update booking status.");
+    throw new Error(`Failed to update booking status: ${e.message || 'Unknown error'}`);
   }
 }
 
@@ -178,9 +179,9 @@ export async function getBookingById(bookingId: string): Promise<BookingRequest 
       };
       console.log("Booking found for ID:", bookingId, bookingData);
       return bookingData;
-    } catch (e) {
+    } catch (e: any) {
       console.error("Error getting booking by ID: ", e);
-      throw new Error("Failed to retrieve booking request by ID.");
+      throw new Error(`Failed to retrieve booking request by ID: ${e.message || 'Unknown error'}`);
     }
   }
 
@@ -195,23 +196,31 @@ export async function getUserProfile(userId: string): Promise<UserProfileData | 
         const docSnap = await getDoc(userDocRef);
 
         if (!docSnap.exists()) {
-            console.log("No user profile found for ID:", userId);
+            console.warn(`No user profile found for ID: ${userId}. This might be expected for new users.`);
             return null;
         }
 
         const data = docSnap.data();
+        // Basic validation for expected fields
+        if (!data.name || !data.email || !data.department) {
+            console.error(`User profile data for ID ${userId} is incomplete:`, data);
+            // Decide if you want to throw an error or return partial data / null
+            // For now, returning null as the profile is considered invalid
+            return null;
+        }
+
         const userProfile: UserProfileData = {
             name: data.name,
             email: data.email,
             department: data.department,
-            createdAt: data.createdAt,
+            createdAt: data.createdAt, // This will be undefined if not set, which is fine
         };
          console.log("User profile found for ID:", userId, userProfile);
         return userProfile;
 
-    } catch (e) {
-        console.error("Error getting user profile: ", e);
-        throw new Error("Failed to retrieve user profile.");
+    } catch (e: any) {
+        console.error(`Error getting user profile for ID ${userId}: `, e);
+        throw new Error(`Failed to retrieve user profile. Original error: ${e.message || 'Unknown Firestore error'}`);
     }
 }
 
@@ -249,9 +258,9 @@ export async function getUserBookings(userId: string): Promise<BookingRequest[]>
     });
     console.log(`Found ${bookings.length} bookings for user ID: ${userId}`);
     return bookings;
-  } catch (e) {
+  } catch (e: any) {
     console.error("Error getting user bookings: ", e);
-    throw new Error("Failed to retrieve user bookings.");
+    throw new Error(`Failed to retrieve user bookings: ${e.message || 'Unknown error'}`);
   }
 }
 
