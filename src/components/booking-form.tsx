@@ -1,3 +1,4 @@
+
 'use client';
 
 import * as React from 'react';
@@ -27,6 +28,8 @@ import {authorizeBooking, type AuthorizeBookingOutput} from '@/ai/flows/authoriz
 const bookingFormSchema = z.object({
   studentId: z.string().min(2, {
     message: 'Student ID must be at least 2 characters.',
+    // Optionally add email validation if using email as ID
+    // }).email({ message: "Please enter a valid email address."
   }),
   hallPreference: z.string().min(1, {
     message: 'Hall preference is required.',
@@ -42,25 +45,36 @@ interface BookingFormProps {
   onSubmitSuccess: (result: (AuthorizeBookingOutput & { formData: BookingFormData }) | null, error?: string) => void;
   onLoadingChange: (isLoading: boolean) => void;
   isLoading: boolean;
+  defaultStudentId?: string | null; // Optional prop to prefill student ID
 }
 
-export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading }: BookingFormProps) {
+export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, defaultStudentId }: BookingFormProps) {
   const {toast} = useToast();
 
   const form = useForm<BookingFormData>({
     resolver: zodResolver(bookingFormSchema),
     defaultValues: {
-      studentId: '',
+      studentId: defaultStudentId || '', // Use defaultStudentId if provided
       hallPreference: '',
       dates: undefined,
     },
   });
 
+   // Effect to reset the form if the defaultStudentId changes (e.g., user logs in/out)
+   React.useEffect(() => {
+     form.reset({
+       studentId: defaultStudentId || '',
+       hallPreference: '',
+       dates: undefined,
+     });
+   }, [defaultStudentId, form]);
+
+
   async function onSubmit(data: BookingFormData) {
     onLoadingChange(true);
     try {
       // Simulate fetching student history and hall availability
-      // In a real app, these would be fetched from a database or API
+      // In a real app, these would be fetched from a database or API based on the studentId (or logged-in user)
       const studentHistory = 'No major issues reported. Minor noise complaint in previous semester.';
       const hallAvailability = 'Hall A is available on the requested date. Hall B is booked.';
 
@@ -79,7 +93,8 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading }: Boo
         title: 'Booking Submitted',
         description: 'Your booking request has been processed.',
       });
-      form.reset(); // Reset form after successful submission
+      // Don't reset form here, let the parent component handle visibility/reset
+      // form.reset();
 
     } catch (error) {
        console.error('Booking submission error:', error);
@@ -107,9 +122,14 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading }: Boo
                 <User className="h-4 w-4 text-muted-foreground" /> Student ID
               </FormLabel>
               <FormControl>
-                <Input placeholder="Enter your student ID" {...field} />
+                {/* Consider making this read-only if prefilled and linked to the logged-in user */}
+                <Input
+                    placeholder="Enter your student ID or email"
+                    {...field}
+                    // disabled={!!defaultStudentId} // Optionally disable if prefilled
+                 />
               </FormControl>
-              <FormDescription>Your unique college identification number.</FormDescription>
+              <FormDescription>Your unique college identification number or email.</FormDescription>
               <FormMessage />
             </FormItem>
           )}

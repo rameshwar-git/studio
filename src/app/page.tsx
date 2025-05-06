@@ -1,13 +1,18 @@
+
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
 import type {BookingFormData} from '@/components/booking-form';
 import {BookingForm} from '@/components/booking-form';
 import {BookingConfirmation} from '@/components/booking-confirmation';
 import type {AuthorizeBookingOutput} from '@/ai/flows/authorize-booking';
-import { savePendingBooking } from '@/services/firestore'; // Import Firestore service
+import { savePendingBooking, getUserProfile, type UserProfileData } from '@/services/firestore'; // Import Firestore service
 import { sendApprovalEmail } from '@/services/email'; // Import Email service
 import crypto from 'crypto'; // For generating token
+import { useAuth } from '@/context/AuthContext'; // Import useAuth hook
+import { Button } from '@/components/ui/button'; // Import Button
+import { LogIn, Loader2, User } from 'lucide-react'; // Import icons
 
 // Extend BookingResult to include database ID and token
 interface BookingResult extends AuthorizeBookingOutput {
@@ -17,15 +22,48 @@ interface BookingResult extends AuthorizeBookingOutput {
 }
 
 export default function Home() {
+  const { user, loading: authLoading } = useAuth(); // Get user and loading state from context
   const [bookingResult, setBookingResult] = React.useState<BookingResult | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [userProfile, setUserProfile] = React.useState<UserProfileData | null>(null);
+  const [profileLoading, setProfileLoading] = React.useState(false);
+
+
+   // Fetch user profile when user is authenticated
+   React.useEffect(() => {
+    async function fetchUserProfile() {
+      if (user) {
+        setProfileLoading(true);
+        try {
+          const profile = await getUserProfile(user.uid);
+          setUserProfile(profile);
+        } catch (err) {
+          console.error("Failed to fetch user profile:", err);
+          setError("Could not load your profile information.");
+        } finally {
+          setProfileLoading(false);
+        }
+      } else {
+        setUserProfile(null); // Clear profile if user logs out
+      }
+    }
+    fetchUserProfile();
+  }, [user]);
+
 
   // Function to handle the result from BookingForm
   const handleBookingSubmit = async (result: BookingResult | null, errorMsg?: string) => {
     setError(errorMsg || null); // Set error first if any
 
     if (result && !errorMsg) {
+      // Ensure user is logged in before proceeding
+      if (!user) {
+         setError("You must be logged in to make a booking.");
+         setIsLoading(false);
+         return;
+      }
+
       // If AI indicates director approval is needed
       if (result.requiresDirectorApproval) {
         setIsLoading(true); // Keep loading indicator on while saving/sending email
@@ -33,8 +71,8 @@ export default function Home() {
           // 1. Generate a unique token
           const token = crypto.randomBytes(32).toString('hex');
 
-          // 2. Save pending booking to Firestore
-          const bookingId = await savePendingBooking(result.formData, token);
+          // 2. Save pending booking to Firestore, including the userId
+          const bookingId = await savePendingBooking(result.formData, token, user.uid);
 
           // 3. Send email to director with the approval link
           const directorEmail = process.env.NEXT_PUBLIC_DIRECTOR_EMAIL || 'director@example.com'; // Get director email from env
@@ -57,6 +95,7 @@ export default function Home() {
       } else {
         // If auto-approved by AI, just display the confirmation
         // In a real app, you might still save this directly as an 'approved' booking
+         // Potentially save auto-approved booking here with user.uid if needed
         setBookingResult(result);
         setIsLoading(false);
       }
@@ -77,9 +116,52 @@ export default function Home() {
     }
   };
 
+  // Render loading state while checking authentication
+   if (authLoading || (user && profileLoading)) {
+    return (
+       <main className="container mx-auto flex min-h-screen flex-col items-center justify-center p-4 md:p-8">
+        <div className="flex flex-col items-center space-y-2">
+          <Loader2 className="h-12 w-12 animate-spin text-primary" />
+           <p className="text-lg text-muted-foreground">{authLoading ? 'Checking authentication...' : 'Loading profile...'}</p>
+        </div>
+       </main>
+    );
+  }
+
+  // Render login prompt if user is not authenticated
+  if (!user) {
+    return (
+       <main className="container mx-auto flex min-h-screen flex-col items-center justify-center p-4 md:p-8">
+        <div className="w-full max-w-md space-y-6 rounded-lg border bg-card p-8 text-center shadow-lg">
+          <h1 className="text-3xl font-bold text-primary">Welcome to HallPass</h1>
+          <p className="text-muted-foreground">Please log in or register to book a hall.</p>
+          <div className="flex justify-center gap-4">
+             <Button asChild>
+              <Link href="/login">
+                <LogIn className="mr-2 h-4 w-4" /> Login
+              </Link>
+            </Button>
+            <Button variant="outline" asChild>
+               <Link href="/register">
+                 <User className="mr-2 h-4 w-4" /> Register
+               </Link>
+            </Button>
+          </div>
+        </div>
+       </main>
+    );
+  }
+
+  // Render main booking page if user is authenticated
   return (
     <main className="container mx-auto flex min-h-screen flex-col items-center justify-center p-4 md:p-8">
       <div className="w-full max-w-2xl space-y-8">
+         {/* Optional: Display welcome message */}
+        {userProfile && (
+            <p className="text-center text-lg text-muted-foreground">
+              Welcome, {userProfile.name}! ({userProfile.department})
+            </p>
+        )}
         <h1 className="text-center text-4xl font-bold text-primary">HallPass</h1>
         <p className="text-center text-muted-foreground">
           Register for your college hall booking.
@@ -90,6 +172,8 @@ export default function Home() {
             onSubmitSuccess={handleBookingSubmit}
             onLoadingChange={handleLoadingChange}
             isLoading={isLoading} // Pass loading state down
+            // Pass user profile data to prefill if needed (e.g., student ID)
+            defaultStudentId={userProfile?.email} // Example: Prefill student ID with email
           />
         )}
 
@@ -134,6 +218,19 @@ export default function Home() {
           </button>
         )}
       </div>
+       {/* Add Logout Button */}
+        <Button
+          variant="outline"
+          onClick={async () => {
+            await auth.signOut();
+            // Optionally redirect to login or show logged out message
+             toast({ title: 'Logged Out', description: 'You have been successfully logged out.' });
+             // router.push('/login'); // Optional redirect
+          }}
+          className="absolute right-4 top-4"
+        >
+          Logout
+        </Button>
     </main>
   );
 }

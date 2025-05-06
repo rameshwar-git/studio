@@ -1,3 +1,4 @@
+
 "use client"
 
 import * as React from "react"
@@ -145,6 +146,19 @@ const SelectSeparator = React.forwardRef<
   />
 ))
 SelectSeparator.displayName = SelectPrimitive.Separator.displayName
+
+// Added props for better type checking and compatibility
+export interface SelectProps extends SelectPrimitive.SelectProps {}
+export interface SelectGroupProps extends SelectPrimitive.SelectGroupProps {}
+export interface SelectValueProps extends SelectPrimitive.SelectValueProps {}
+export interface SelectTriggerProps extends SelectPrimitive.SelectTriggerProps {}
+export interface SelectContentProps extends SelectPrimitive.SelectContentProps {}
+export interface SelectLabelProps extends SelectPrimitive.SelectLabelProps {}
+export interface SelectItemProps extends SelectPrimitive.SelectItemProps {}
+export interface SelectSeparatorProps extends SelectPrimitive.SelectSeparatorProps {}
+export interface SelectScrollUpButtonProps extends SelectPrimitive.SelectScrollUpButtonProps {}
+export interface SelectScrollDownButtonProps extends SelectPrimitive.SelectScrollDownButtonProps {}
+
 
 export {
   Select,

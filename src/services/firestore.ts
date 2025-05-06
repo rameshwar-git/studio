@@ -1,9 +1,10 @@
+
 'use server';
 /**
- * @fileOverview Firestore service functions for managing booking data.
+ * @fileOverview Firestore service functions for managing booking and user profile data.
  */
 import { db } from '@/lib/firebase';
-import { collection, addDoc, query, where, getDocs, updateDoc, doc, getDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, updateDoc, doc, getDoc, setDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import type { BookingFormData } from '@/components/booking-form'; // Assuming BookingFormData includes necessary fields
 
 export interface BookingRequest extends BookingFormData {
@@ -13,20 +14,51 @@ export interface BookingRequest extends BookingFormData {
   createdAt: Timestamp;
   approvedAt?: Timestamp;
   rejectedAt?: Timestamp;
+  userId?: string; // Link booking to the user who created it
+}
+
+export interface UserProfileData {
+    name: string;
+    email: string;
+    department: string;
+    createdAt?: Timestamp; // Optional: track when the profile was created
 }
 
 const PENDING_BOOKINGS_COLLECTION = 'pendingBookings';
+const USERS_COLLECTION = 'users';
+
+/**
+ * Saves user profile data to Firestore. Typically called after registration.
+ * @param userId - The Firebase Authentication user ID.
+ * @param profileData - The user profile data to save.
+ */
+export async function saveUserProfile(userId: string, profileData: UserProfileData): Promise<void> {
+  try {
+    const userDocRef = doc(db, USERS_COLLECTION, userId);
+    await setDoc(userDocRef, {
+        ...profileData,
+        createdAt: serverTimestamp(), // Add a timestamp for creation date
+    });
+    console.log("User profile saved for user ID: ", userId);
+  } catch (e) {
+    console.error("Error saving user profile: ", e);
+    throw new Error("Failed to save user profile.");
+  }
+}
+
 
 /**
  * Saves a pending booking request to Firestore.
  * @param bookingDetails - The details of the booking.
  * @param token - The unique authorization token.
+ * @param userId - The ID of the user making the booking.
  * @returns The ID of the newly created Firestore document.
  */
-export async function savePendingBooking(bookingDetails: BookingFormData, token: string): Promise<string> {
+export async function savePendingBooking(bookingDetails: BookingFormData, token: string, userId?: string): Promise<string> {
   try {
     const docRef = await addDoc(collection(db, PENDING_BOOKINGS_COLLECTION), {
       ...bookingDetails,
+      userId: userId || null, // Store the user ID or null if not logged in
       dates: Timestamp.fromDate(bookingDetails.dates), // Store date as Firestore Timestamp
       status: 'pending',
       token: token,
@@ -62,12 +94,13 @@ export async function getBookingByToken(token: string): Promise<BookingRequest |
     // Convert Firestore Timestamp back to Date object if needed by frontend
     const bookingData: BookingRequest = {
       id: docSnap.id,
-      studentId: data.studentId,
+      studentId: data.studentId, // Keep studentId from form for now
       hallPreference: data.hallPreference,
       dates: (data.dates as Timestamp).toDate(), // Convert Timestamp to Date
       status: data.status,
       token: data.token,
       createdAt: data.createdAt,
+      userId: data.userId, // Include userId
        // Add optional fields if they exist
       approvedAt: data.approvedAt,
       rejectedAt: data.rejectedAt,
@@ -130,6 +163,7 @@ export async function getBookingById(bookingId: string): Promise<BookingRequest 
         status: data.status,
         token: data.token, // Include token if needed elsewhere
         createdAt: data.createdAt,
+        userId: data.userId, // Include userId
          // Add optional fields if they exist
         approvedAt: data.approvedAt,
         rejectedAt: data.rejectedAt,
@@ -141,3 +175,35 @@ export async function getBookingById(bookingId: string): Promise<BookingRequest 
       throw new Error("Failed to retrieve booking request by ID.");
     }
   }
+
+/**
+ * Retrieves user profile data from Firestore.
+ * @param userId - The Firebase Authentication user ID.
+ * @returns The user profile data or null if not found.
+ */
+export async function getUserProfile(userId: string): Promise<UserProfileData | null> {
+    try {
+        const userDocRef = doc(db, USERS_COLLECTION, userId);
+        const docSnap = await getDoc(userDocRef);
+
+        if (!docSnap.exists()) {
+            console.log("No user profile found for ID:", userId);
+            return null;
+        }
+
+        const data = docSnap.data();
+        // Ensure correct type casting
+        const userProfile: UserProfileData = {
+            name: data.name,
+            email: data.email,
+            department: data.department,
+            createdAt: data.createdAt, // Include createdAt if stored
+        };
+         console.log("User profile found for ID:", userId, userProfile);
+        return userProfile;
+
+    } catch (e) {
+        console.error("Error getting user profile: ", e);
+        throw new Error("Failed to retrieve user profile.");
+    }
+}
