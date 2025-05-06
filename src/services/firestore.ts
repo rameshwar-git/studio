@@ -1,10 +1,11 @@
+
 'use server';
 /**
  * @fileOverview Firebase service functions for managing booking (Firestore) and user profile data (Realtime Database).
  */
 import { db, realtimeDB } from '@/lib/firebase'; // Use db for Firestore, realtimeDB for Realtime DB
 import { collection, addDoc, query, where, getDocs, updateDoc, doc, getDoc, serverTimestamp as firestoreServerTimestamp, Timestamp, orderBy, type FieldValue } from 'firebase/firestore';
-import { ref, set as setRealtimeDB, get as getRealtimeDB, serverTimestamp as realtimeServerTimestamp } from "firebase/database";
+import { ref as rtdbRef, set as setRealtimeDB, get as getRealtimeDB, serverTimestamp as realtimeServerTimestamp } from "firebase/database";
 import type { BookingFormData } from '@/components/booking-form';
 import { startOfDay, endOfDay, parse, format, setHours, setMinutes, startOfMonth, endOfMonth } from 'date-fns';
 
@@ -33,11 +34,12 @@ export interface UserProfileData {
 
 const PENDING_BOOKINGS_COLLECTION = 'pendingBookings';
 const USERS_RTDB_PATH = 'users';
+const HALL_BOOKINGS_RTDB_PATH = 'hallBookings'; // Path for hall bookings in Realtime Database
 
 
 export async function saveUserProfile(userId: string, profileData: Omit<UserProfileData, 'createdAt'>): Promise<void> {
   try {
-    const userProfileRef = ref(realtimeDB, `${USERS_RTDB_PATH}/${userId}/profile`);
+    const userProfileRef = rtdbRef(realtimeDB, `${USERS_RTDB_PATH}/${userId}/profile`);
     await setRealtimeDB(userProfileRef, {
         ...profileData,
         createdAt: realtimeServerTimestamp(), 
@@ -53,30 +55,61 @@ export async function savePendingBooking(bookingDetails: BookingFormData, token:
   try {
     const { date, startTime, endTime, ...restOfDetails } = bookingDetails;
     
-    const bookingDateStartOfDay = startOfDay(date);
+    const bookingDateStartOfDay = startOfDay(date); // This is a JS Date
     const [startH, startM] = startTime.split(':').map(Number);
     const [endH, endM] = endTime.split(':').map(Number);
 
-    const startTimeDate = setMinutes(setHours(bookingDateStartOfDay, startH), startM);
-    const endTimeDate = setMinutes(setHours(bookingDateStartOfDay, endH), endM);
+    const startTimeDate = setMinutes(setHours(bookingDateStartOfDay, startH), startM); // JS Date
+    const endTimeDate = setMinutes(setHours(bookingDateStartOfDay, endH), endM); // JS Date
 
+    // 1. Save to Firestore
     const docRef = await addDoc(collection(db, PENDING_BOOKINGS_COLLECTION), {
       ...restOfDetails,
-      date: Timestamp.fromDate(bookingDateStartOfDay), // Store date as Firestore Timestamp (start of day for easier date-only queries)
-      startTime, // Store as string e.g., "09:00"
-      endTime,   // Store as string e.g., "10:00"
-      startTimeDate: Timestamp.fromDate(startTimeDate), // Store full JS Date as Firestore Timestamp for precise time queries
-      endTimeDate: Timestamp.fromDate(endTimeDate),     // Store full JS Date as Firestore Timestamp
+      date: Timestamp.fromDate(bookingDateStartOfDay), 
+      startTime, 
+      endTime,   
+      startTimeDate: Timestamp.fromDate(startTimeDate), 
+      endTimeDate: Timestamp.fromDate(endTimeDate),     
       userId: userId || null,
       status: 'pending',
       token: token,
       createdAt: firestoreServerTimestamp(),
       aiReason: aiReason || null,
     });
-    console.log("Pending booking saved with ID: ", docRef.id);
-    return docRef.id;
+    console.log("Pending booking saved to Firestore with ID: ", docRef.id);
+
+    // 2. Save to Realtime Database
+    // This fulfills the requirement: "if there is no data on hall booking in real time database there create new entry in realtime database"
+    // by ensuring every new booking saved to Firestore also gets an entry in Realtime Database.
+    const bookingId = docRef.id;
+    const hallBookingRef = rtdbRef(realtimeDB, `${HALL_BOOKINGS_RTDB_PATH}/${bookingId}`);
+    
+    // Constructing the data for Realtime Database.
+    // We'll store simplified data, or you can store the full BookingRequest object.
+    // For this example, let's store key details.
+    // Note: Realtime Database doesn't have a native Timestamp type like Firestore.
+    // Dates are often stored as ISO strings or milliseconds since epoch.
+    const rtdbBookingData = {
+        firestoreId: bookingId,
+        studentName: restOfDetails.studentName,
+        studentEmail: restOfDetails.studentEmail,
+        hallPreference: restOfDetails.hallPreference,
+        date: bookingDateStartOfDay.toISOString(), // Store as ISO string
+        startTime: startTime,
+        endTime: endTime,
+        startTimeISO: startTimeDate.toISOString(),
+        endTimeISO: endTimeDate.toISOString(),
+        status: 'pending',
+        userId: userId || null,
+        createdAt: realtimeServerTimestamp(), // Use Realtime Database server timestamp
+        aiReason: aiReason || null,
+    };
+    await setRealtimeDB(hallBookingRef, rtdbBookingData);
+    console.log("Booking data also saved to Realtime Database under hallBookings/", bookingId);
+
+    return bookingId;
   } catch (e: any) {
-    console.error("Error adding document: ", e);
+    console.error("Error adding document and/or saving to Realtime Database: ", e);
     throw new Error(`Failed to save pending booking request: ${e.message || 'Unknown error'}`);
   }
 }
@@ -86,7 +119,13 @@ function mapDocToBookingRequest(docSnap: any): BookingRequest {
     const bookingDate = (data.date as Timestamp).toDate();
     
     let startTimeDate, endTimeDate;
-    if (data.startTime && data.endTime) {
+    // If startTimeDate and endTimeDate are already Firestore Timestamps, use them.
+    // Otherwise, construct from date, startTime, endTime.
+    if (data.startTimeDate && data.endTimeDate) {
+        startTimeDate = (data.startTimeDate as Timestamp).toDate();
+        endTimeDate = (data.endTimeDate as Timestamp).toDate();
+    } else if (data.startTime && data.endTime) {
+        // Fallback if precise timestamps are not stored (though they should be by savePendingBooking)
         const [startH, startM] = data.startTime.split(':').map(Number);
         const [endH, endM] = data.endTime.split(':').map(Number);
         startTimeDate = setMinutes(setHours(bookingDate, startH), startM);
@@ -102,14 +141,14 @@ function mapDocToBookingRequest(docSnap: any): BookingRequest {
       date: bookingDate, // This is the start of the day
       startTime: data.startTime,
       endTime: data.endTime,
-      startTimeDate: data.startTimeDate ? (data.startTimeDate as Timestamp).toDate() : startTimeDate, // Prefer stored precise timestamp
-      endTimeDate: data.endTimeDate ? (data.endTimeDate as Timestamp).toDate() : endTimeDate,       // Prefer stored precise timestamp
+      startTimeDate: startTimeDate,
+      endTimeDate: endTimeDate,
       status: data.status,
       token: data.token,
-      createdAt: data.createdAt,
+      createdAt: data.createdAt, // Firestore Timestamp
       userId: data.userId,
-      approvedAt: data.approvedAt,
-      rejectedAt: data.rejectedAt,
+      approvedAt: data.approvedAt, // Firestore Timestamp
+      rejectedAt: data.rejectedAt, // Firestore Timestamp
       rejectionReason: data.rejectionReason,
       aiReason: data.aiReason,
     };
@@ -125,8 +164,7 @@ export async function getBookingByToken(token: string): Promise<BookingRequest |
       console.log("No matching booking found for token:", token);
       return null;
     }
-    // querySnapshot.docs[0] is a QueryDocumentSnapshot<DocumentData, DocumentData>
-    // It needs to be passed to mapDocToBookingRequest
+    
     const booking = mapDocToBookingRequest(querySnapshot.docs[0]);
     console.log("Booking found for token:", token, booking);
     return booking;
@@ -138,20 +176,45 @@ export async function getBookingByToken(token: string): Promise<BookingRequest |
 
 export async function updateBookingStatus(bookingId: string, newStatus: 'approved' | 'rejected', rejectionReason?: string): Promise<void> {
   try {
+    // 1. Update Firestore
     const bookingRef = doc(db, PENDING_BOOKINGS_COLLECTION, bookingId);
-    const updateData: Partial<BookingRequest> & { approvedAt?: FieldValue, rejectedAt?: FieldValue} = { // Ensure FieldValue is part of the type
+    const updateData: Partial<BookingRequest> & { approvedAt?: FieldValue, rejectedAt?: FieldValue, status: 'approved' | 'rejected'} = { 
         status: newStatus,
     };
     if (newStatus === 'approved') {
-        updateData.approvedAt = firestoreServerTimestamp(); // Directly assign serverTimestamp
-        updateData.rejectionReason = undefined; // Clear rejection reason
+        updateData.approvedAt = firestoreServerTimestamp(); 
+        updateData.rejectionReason = undefined; 
     } else {
-        updateData.rejectedAt = firestoreServerTimestamp(); // Directly assign serverTimestamp
+        updateData.rejectedAt = firestoreServerTimestamp(); 
         updateData.rejectionReason = rejectionReason || "No reason provided.";
     }
     
     await updateDoc(bookingRef, updateData);
-    console.log(`Booking ${bookingId} status updated to ${newStatus}`);
+    console.log(`Booking ${bookingId} status updated to ${newStatus} in Firestore`);
+
+    // 2. Update Realtime Database
+    const hallBookingRtdbRef = rtdbRef(realtimeDB, `${HALL_BOOKINGS_RTDB_PATH}/${bookingId}`);
+    const rtdbSnapshot = await getRealtimeDB(hallBookingRtdbRef);
+    if (rtdbSnapshot.exists()) {
+        const rtdbUpdateData: any = { status: newStatus };
+        if (newStatus === 'approved') {
+            rtdbUpdateData.approvedAt = realtimeServerTimestamp();
+            rtdbUpdateData.rejectionReason = null; // Clear rejection reason in RTDB
+        } else {
+            rtdbUpdateData.rejectedAt = realtimeServerTimestamp();
+            rtdbUpdateData.rejectionReason = rejectionReason || "No reason provided.";
+        }
+        await setRealtimeDB(rtdbRef(realtimeDB, `${HALL_BOOKINGS_RTDB_PATH}/${bookingId}`), {
+            ...rtdbSnapshot.val(), // Preserve existing data
+            ...rtdbUpdateData      // Apply updates
+        });
+        console.log(`Booking ${bookingId} status updated to ${newStatus} in Realtime Database`);
+    } else {
+        console.warn(`Booking ${bookingId} not found in Realtime Database for status update.`);
+        // Optionally, you could create it here if it's missing, based on Firestore data.
+        // For now, just log a warning.
+    }
+
   } catch (e: any) {
     console.error("Error updating booking status: ", e);
     throw new Error(`Failed to update booking status: ${e.message || 'Unknown error'}`);
@@ -178,14 +241,14 @@ export async function getBookingById(bookingId: string): Promise<BookingRequest 
 
 export async function getUserProfile(userId: string): Promise<UserProfileData | null> {
     try {
-        const userProfileRef = ref(realtimeDB, `${USERS_RTDB_PATH}/${userId}/profile`);
+        const userProfileRef = rtdbRef(realtimeDB, `${USERS_RTDB_PATH}/${userId}/profile`);
         const snapshot = await getRealtimeDB(userProfileRef);
 
         if (!snapshot.exists()) {
             console.warn(`No user profile found in Realtime Database for ID: ${userId}.`);
             return null;
         }
-        const data = snapshot.val() as UserProfileData; // Type assertion
+        const data = snapshot.val() as UserProfileData; 
          if (!data || !data.name || !data.email || !data.department) {
             console.error(`User profile data from Realtime Database for ID ${userId} is incomplete or malformed:`, data);
             throw new Error(`Incomplete user profile data retrieved for ID ${userId}.`);
@@ -193,14 +256,13 @@ export async function getUserProfile(userId: string): Promise<UserProfileData | 
         console.log("User profile found in Realtime Database for ID:", userId, data);
         return data;
 
-    } catch (e: any) // Explicitly type e as any or Error
+    } catch (e: any) 
      {
         console.error(`Error getting user profile from Realtime Database for ID ${userId}: `, e);
-         // Check if the error is one of the specific messages we want to re-throw directly
          if (e.message && (e.message.startsWith('Failed to retrieve user profile') || e.message.startsWith('Incomplete user profile data'))) {
-             throw e; // Re-throw the specific error
+             throw e; 
         }
-        // For other errors, wrap it in a generic message
+        
         throw new Error(`Failed to retrieve user profile. Original error: ${e.message || 'Unknown Realtime Database error'}`);
     }
 }
@@ -225,7 +287,7 @@ export async function getUserBookings(userId: string): Promise<BookingRequest[]>
 
 
 /**
- * Retrieves all bookings for a specific hall on a specific date.
+ * Retrieves all bookings for a specific hall on a specific date from Firestore.
  * This is used to check for time conflicts.
  * @param hallPreference - The name of the hall.
  * @param date - The specific date (JS Date object, time part will be ignored for date range).
@@ -233,19 +295,20 @@ export async function getUserBookings(userId: string): Promise<BookingRequest[]>
  */
 export async function getHallBookingsForDate(hallPreference: string, date: Date): Promise<BookingRequest[]> {
   try {
+    // Query Firestore as it's the source of truth for detailed booking objects
     const dayStart = Timestamp.fromDate(startOfDay(date));
     const dayEnd = Timestamp.fromDate(endOfDay(date));
 
     const q = query(
       collection(db, PENDING_BOOKINGS_COLLECTION),
       where("hallPreference", "==", hallPreference),
-      where("date", ">=", dayStart), // Using the 'date' field which is start of day
-      where("date", "<=", dayEnd),   // Using the 'date' field which is start of day
-      where("status", "in", ["pending", "approved"]) // Only consider active/pending bookings
+      where("date", ">=", dayStart), 
+      where("date", "<=", dayEnd),   
+      where("status", "in", ["pending", "approved"]) 
     );
     const querySnapshot = await getDocs(q);
     const bookings: BookingRequest[] = querySnapshot.docs.map(mapDocToBookingRequest);
-    console.log(`Found ${bookings.length} bookings for hall '${hallPreference}' on ${format(date, 'PPP')}`);
+    console.log(`Found ${bookings.length} Firestore bookings for hall '${hallPreference}' on ${format(date, 'PPP')}`);
     return bookings;
   } catch (e: any) {
     console.error(`Error getting bookings for hall ${hallPreference} on date ${date}: `, e);
@@ -254,7 +317,7 @@ export async function getHallBookingsForDate(hallPreference: string, date: Date)
 }
 
 /**
- * Retrieves all bookings for all halls within a given month.
+ * Retrieves all bookings for all halls within a given month from Firestore.
  * This is used for populating the venue availability calendar.
  * @param year - The year (e.g., 2024).
  * @param month - The month (0-indexed, e.g., 0 for January).
@@ -262,6 +325,7 @@ export async function getHallBookingsForDate(hallPreference: string, date: Date)
  */
 export async function getVenueAvailabilityForMonth(year: number, month: number): Promise<BookingRequest[]> {
   try {
+    // Query Firestore as it's the source of truth
     const dateInMonth = new Date(year, month, 1);
     const monthStart = Timestamp.fromDate(startOfMonth(dateInMonth));
     const monthEnd = Timestamp.fromDate(endOfMonth(dateInMonth));
@@ -270,11 +334,11 @@ export async function getVenueAvailabilityForMonth(year: number, month: number):
       collection(db, PENDING_BOOKINGS_COLLECTION),
       where("date", ">=", monthStart),
       where("date", "<=", monthEnd),
-      where("status", "in", ["pending", "approved"]) // Only consider active/pending bookings
+      where("status", "in", ["pending", "approved"]) 
     );
     const querySnapshot = await getDocs(q);
     const bookings: BookingRequest[] = querySnapshot.docs.map(mapDocToBookingRequest);
-    console.log(`Found ${bookings.length} total bookings for ${format(dateInMonth, 'MMMM yyyy')}`);
+    console.log(`Found ${bookings.length} total Firestore bookings for ${format(dateInMonth, 'MMMM yyyy')}`);
     return bookings;
   } catch (e: any) {
     console.error(`Error getting venue availability for month ${month + 1}/${year}: `, e);
@@ -282,3 +346,42 @@ export async function getVenueAvailabilityForMonth(year: number, month: number):
   }
 }
 
+// Example function to get a booking from Realtime Database (if needed directly)
+// This is illustrative, as Firestore is currently the primary source for getHallBookingsForDate and getVenueAvailabilityForMonth
+export async function getHallBookingFromRealtimeDB(bookingId: string): Promise<any | null> {
+    try {
+        const bookingRef = rtdbRef(realtimeDB, `${HALL_BOOKINGS_RTDB_PATH}/${bookingId}`);
+        const snapshot = await getRealtimeDB(bookingRef);
+        if (snapshot.exists()) {
+            return snapshot.val();
+        }
+        return null;
+    } catch (e: any) {
+        console.error(`Error fetching booking ${bookingId} from Realtime Database: `, e);
+        throw new Error(`Failed to fetch booking from Realtime Database: ${e.message || 'Unknown error'}`);
+    }
+}
+
+// Example function to get all hall bookings from Realtime Database for a specific date
+// This would require restructuring how data is stored in RTDB or client-side filtering
+// For complex queries, Firestore is generally preferred.
+// This is a simplified example and might be inefficient for large datasets.
+export async function getHallBookingsForDateFromRealtimeDB(date: Date): Promise<any[]> {
+    try {
+        const allBookingsRef = rtdbRef(realtimeDB, HALL_BOOKINGS_RTDB_PATH);
+        const snapshot = await getRealtimeDB(allBookingsRef);
+        if (snapshot.exists()) {
+            const allBookings = snapshot.val();
+            const dateString = startOfDay(date).toISOString().split('T')[0]; // YYYY-MM-DD
+            
+            const bookingsForDate = Object.values(allBookings).filter((booking: any) => {
+                return booking.date && booking.date.startsWith(dateString) && (booking.status === 'pending' || booking.status === 'approved');
+            });
+            return bookingsForDate;
+        }
+        return [];
+    } catch (e: any) {
+        console.error(`Error fetching hall bookings for date ${date.toISOString()} from Realtime Database: `, e);
+        throw new Error(`Failed to fetch bookings from Realtime Database: ${e.message || 'Unknown error'}`);
+    }
+}
