@@ -1,5 +1,5 @@
 import type * as React from 'react';
-import { CheckCircle, AlertTriangle, User, Building, CalendarDays } from 'lucide-react';
+import { CheckCircle, AlertTriangle, User, Building, CalendarDays, Mail, Clock } from 'lucide-react';
 import { format } from 'date-fns';
 import type { BookingFormData } from './booking-form';
 import type { AuthorizeBookingOutput } from '@/ai/flows/authorize-booking';
@@ -10,20 +10,75 @@ import { Badge } from '@/components/ui/badge';
 interface BookingConfirmationProps {
   bookingDetails: BookingFormData;
   authorization: AuthorizeBookingOutput;
+  bookingId?: string; // Optional booking ID from Firestore
 }
 
-export function BookingConfirmation({ bookingDetails, authorization }: BookingConfirmationProps) {
+export function BookingConfirmation({ bookingDetails, authorization, bookingId }: BookingConfirmationProps) {
   const { studentId, hallPreference, dates } = bookingDetails;
   const { requiresDirectorApproval, reason } = authorization;
+
+  const getStatusBadge = () => {
+    if (requiresDirectorApproval) {
+      return <Badge variant="destructive" className="mb-1 bg-yellow-500 text-yellow-900 hover:bg-yellow-500/80">Pending Director Approval</Badge>;
+    } else {
+      return <Badge variant="default" className="mb-1 bg-green-600 hover:bg-green-600/80">Auto-Approved</Badge>;
+    }
+  };
+
+   const getStatusIcon = () => {
+    if (requiresDirectorApproval) {
+       return <Mail className="mt-1 h-5 w-5 flex-shrink-0 text-yellow-600" />;
+    } else {
+      return <CheckCircle className="mt-1 h-5 w-5 flex-shrink-0 text-green-600" />;
+    }
+  };
+
+  const getStatusBorderColor = () => {
+     return requiresDirectorApproval ? 'border-yellow-500 bg-yellow-50' : 'border-green-500 bg-green-50';
+  }
+
+   const getStatusTextColor = () => {
+    return requiresDirectorApproval ? 'text-yellow-800' : 'text-green-800';
+   }
+
+   const getStatusDescription = () => {
+     if (requiresDirectorApproval) {
+       return (
+         <>
+            <p className={`text-sm ${getStatusTextColor()}`}>{reason}</p>
+            <p className="mt-2 text-sm text-muted-foreground italic">
+               An email has been sent to the director for review. You will be notified via email once a decision is made. Your request ID is: <strong>{bookingId || 'N/A'}</strong>
+            </p>
+         </>
+       );
+     } else {
+       return (
+         <>
+           <p className={`text-sm ${getStatusTextColor()}`}>{reason}</p>
+           <p className="mt-2 text-sm text-muted-foreground italic">
+             Your booking is provisionally confirmed based on initial checks. No further action is needed from you at this time.
+           </p>
+         </>
+       );
+     }
+   };
+
 
   return (
     <Card className="w-full max-w-2xl shadow-md">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-2xl text-primary">
-          <CheckCircle className="h-6 w-6 text-green-600" /> Booking Request Submitted
+          {requiresDirectorApproval ? (
+              <Clock className="h-6 w-6 text-yellow-600" />
+          ) : (
+             <CheckCircle className="h-6 w-6 text-green-600" />
+          )}
+           Booking Request {requiresDirectorApproval ? 'Pending' : 'Submitted'}
         </CardTitle>
         <CardDescription>
-          Your request has been received and is being processed.
+           {requiresDirectorApproval
+            ? 'Your request requires director approval and has been submitted for review.'
+            : 'Your request has been received and auto-approved based on initial checks.'}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -49,31 +104,13 @@ export function BookingConfirmation({ bookingDetails, authorization }: BookingCo
 
         <div>
           <h3 className="mb-2 text-lg font-semibold text-foreground">Authorization Status:</h3>
-          <div className={`flex items-start gap-2 rounded-md border p-4 ${requiresDirectorApproval ? 'border-yellow-500 bg-yellow-50' : 'border-green-500 bg-green-50'}`}>
-            {requiresDirectorApproval ? (
-              <AlertTriangle className="mt-1 h-5 w-5 flex-shrink-0 text-yellow-600" />
-            ) : (
-              <CheckCircle className="mt-1 h-5 w-5 flex-shrink-0 text-green-600" />
-            )}
-            <div>
-              <Badge variant={requiresDirectorApproval ? 'destructive' : 'default'} className="mb-1">
-                {requiresDirectorApproval ? 'Director Approval Required' : 'Auto-Approved'}
-              </Badge>
-              <p className={`text-sm ${requiresDirectorApproval ? 'text-yellow-800' : 'text-green-800'}`}>
-                {reason}
-              </p>
+          <div className={`flex items-start gap-3 rounded-md border p-4 ${getStatusBorderColor()}`}>
+             {getStatusIcon()}
+            <div className="flex-1">
+               {getStatusBadge()}
+              {getStatusDescription()}
             </div>
           </div>
-           {requiresDirectorApproval && (
-            <p className="mt-2 text-sm text-muted-foreground italic">
-               Your request will be forwarded to the director for review. You will be notified once a decision is made.
-            </p>
-           )}
-            {!requiresDirectorApproval && (
-             <p className="mt-2 text-sm text-muted-foreground italic">
-               Your booking is provisionally confirmed based on initial checks.
-             </p>
-            )}
         </div>
       </CardContent>
     </Card>
