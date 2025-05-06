@@ -1,4 +1,3 @@
-
 'use client';
 
 import * as React from 'react';
@@ -6,7 +5,7 @@ import {zodResolver} from '@hookform/resolvers/zod';
 import {useForm} from 'react-hook-form';
 import {z} from 'zod';
 import {CalendarIcon, Loader2, User, CalendarDays, Building, Clock, Mail} from 'lucide-react';
-import {format, addHours, setHours, setMinutes, isBefore, isEqual, startOfDay} from 'date-fns';
+import {format, addHours, setHours, setMinutes, isBefore, isEqual, startOfDay, parseISO} from 'date-fns';
 
 import {cn} from '@/lib/utils';
 import {Button} from '@/components/ui/button';
@@ -26,7 +25,7 @@ import {Select, SelectContent, SelectItem, SelectTrigger, SelectValue} from '@/c
 import {useToast} from '@/hooks/use-toast';
 import {authorizeBooking, type AuthorizeBookingOutput} from '@/ai/flows/authorize-booking';
 import type {UserProfileData} from '@/services/firestore';
-import { getHallBookingsForDate } from '@/services/firestore'; // For availability check
+import { getHallBookingsForDateFromRealtimeDB } from '@/services/firestore'; // For availability check from RTDB
 
 const bookingFormSchema = z.object({
   studentName: z.string().min(2, { message: 'Student name must be at least 2 characters.' }),
@@ -112,30 +111,47 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
      });
    }, [userProfile, preselectedDate, form]);
 
-   const checkAvailability = async (hall: string, date: Date, startTime: string, endTime: string): Promise<boolean> => {
-        const selectedDateStart = startOfDay(date);
+   const checkAvailabilityWithRTDB = async (hall: string, date: Date, startTime: string, endTime: string): Promise<{available: boolean, rtdbDataExists: boolean}> => {
+        const selectedDateStartOfDay = startOfDay(date);
         const [startH, startM] = startTime.split(':').map(Number);
         const [endH, endM] = endTime.split(':').map(Number);
 
-        const newBookingStart = setMinutes(setHours(selectedDateStart, startH), startM);
-        const newBookingEnd = setMinutes(setHours(selectedDateStart, endH), endM);
+        const newBookingStart = setMinutes(setHours(selectedDateStartOfDay, startH), startM);
+        const newBookingEnd = setMinutes(setHours(selectedDateStartOfDay, endH), endM);
 
-        const existingBookings = await getHallBookingsForDate(hall, selectedDateStart);
+        let existingBookingsRTDB: any[] = [];
+        let rtdbDataFoundInitially = false; 
+        try {
+            existingBookingsRTDB = await getHallBookingsForDateFromRealtimeDB(hall, selectedDateStartOfDay);
+            rtdbDataFoundInitially = existingBookingsRTDB.length > 0;
+        } catch (rtdbError: any) {
+            // This catch block might not be hit if getHallBookingsForDateFromRealtimeDB handles its own errors and returns []
+            console.warn("Error fetching booking data from Realtime Database for availability check:", rtdbError.message);
+            return { available: true, rtdbDataExists: false }; // Treat as no data found
+        }
+        
+        if (!rtdbDataFoundInitially) {
+            // Case 1: No data available in Realtime Database for this hall/date. Proceed with booking.
+            console.log("No existing bookings found in RTDB for this hall/date. Proceeding.");
+            return { available: true, rtdbDataExists: false };
+        }
+        
+        // Case 2: Data available in Realtime Database. Check for conflicts.
+        console.log(`Found ${existingBookingsRTDB.length} bookings in RTDB for ${hall} on ${format(date, 'PPP')}. Checking for conflicts.`);
+        for (const booking of existingBookingsRTDB) {
+             const existingStart = booking.startTimeISO ? parseISO(booking.startTimeISO) : new Date(booking.startTime);
+             const existingEnd = booking.endTimeISO ? parseISO(booking.endTimeISO) : new Date(booking.endTime);
 
-        for (const booking of existingBookings) {
-            const existingStart = booking.startTimeDate!; 
-            const existingEnd = booking.endTimeDate!;   
-
-            const existingRangeStart = addHours(existingStart, -1);
-            const existingRangeEnd = addHours(existingEnd, 1);
+            const existingRangeStart = addHours(existingStart, -1); // 1-hour gap before
+            const existingRangeEnd = addHours(existingEnd, 1); // 1-hour gap after
 
             if (isBefore(newBookingStart, existingRangeEnd) && isBefore(existingRangeStart, newBookingEnd)) {
-                if (isBefore(newBookingStart, addHours(existingEnd,1)) && isBefore(addHours(existingStart, -1), newBookingEnd)) {
-                    return false; 
-                }
+                 console.log("Conflict found with existing RTDB booking:", booking);
+                 return { available: false, rtdbDataExists: true }; 
             }
         }
-        return true; 
+        console.log("No conflicts found with existing RTDB bookings.");
+        return { available: true, rtdbDataExists: true }; 
     };
 
 
@@ -143,15 +159,22 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
     onLoadingChange(true);
     setError(null); 
     try {
-      const isAvailable = await checkAvailability(data.hallPreference, data.date, data.startTime, data.endTime);
-      if (!isAvailable) {
-        setError(`The selected time slot for ${data.hallPreference} is not available due to an existing booking or required 1-hour gap. Please choose a different time or hall.`);
-        onSubmitSuccess(null, `Selected slot for ${data.hallPreference} is unavailable.`);
+      const { available: isAvailable, rtdbDataExists } = await checkAvailabilityWithRTDB(data.hallPreference, data.date, data.startTime, data.endTime);
+      
+      if (rtdbDataExists && !isAvailable) {
+        // Case 2: Data available, slot booked
+        setError(`No booking is available for ${data.hallPreference} at the selected time. This slot (including 1-hour gaps) conflicts with an existing booking.`);
+        onSubmitSuccess(null, `Selected slot for ${data.hallPreference} is unavailable due to conflict.`);
+        onLoadingChange(false); // Ensure loading is set to false
         return;
       }
+      // If !rtdbDataExists (Case 1), we proceed.
+      // If rtdbDataExists and isAvailable (Case 2, but slot is free), we proceed.
 
       const studentHistory = 'No major issues reported.'; 
-      const hallAvailability = 'Hall availability data is complex and dynamic.'; 
+      const hallAvailability = rtdbDataExists 
+        ? (isAvailable ? `Slot for ${data.hallPreference} appears available based on Realtime Database check.` : `Slot for ${data.hallPreference} has a conflict in Realtime Database.`)
+        : `Availability for ${data.hallPreference} not checked against Realtime Database (no prior bookings for this hall/date).`;
 
       const aiInput = {
         studentId: data.studentEmail, 
@@ -170,11 +193,11 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
         title: 'Booking Submitted',
         description: 'Your booking request has been processed.',
       });
-      form.reset({ // Reset form after successful submission
+      form.reset({ 
           studentName: userProfile?.name || '',
           studentEmail: userProfile?.email || '',
           hallPreference: '',
-          date: undefined, // Clear date
+          date: undefined, 
           startTime: '',
           endTime: '',
       });
@@ -192,7 +215,15 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
       onLoadingChange(false);
     }
   }
-  const [error, setError] = React.useState<string | null>(null);
+  const [error, setErrorReact] = React.useState<string | null>(null); // Renamed to avoid conflict with global error
+
+  // Custom setError function to also log to console for better debugging
+  const setError = (message: string | null) => {
+    if (message) {
+      console.log("Setting error in BookingForm: ", message);
+    }
+    setErrorReact(message);
+  };
 
 
   return (
@@ -277,7 +308,6 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
                         selected={field.value}
                         onSelect={(date) => {
                             field.onChange(date);
-                            // Reset time fields when date changes manually
                             form.setValue('startTime', '');
                             form.setValue('endTime', '');
                         }}
@@ -302,10 +332,10 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
                     <Select 
                         onValueChange={(value) => {
                             field.onChange(value);
-                            form.setValue('endTime', ''); // Reset end time when start time changes
+                            form.setValue('endTime', ''); 
                         }} 
-                        value={field.value} // Use value instead of defaultValue for controlled component
-                        disabled={!form.watch('date')} // Disable if date not selected
+                        value={field.value} 
+                        disabled={!form.watch('date')} 
                     >
                     <FormControl>
                         <SelectTrigger>
@@ -330,7 +360,7 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
                     <FormLabel className="flex items-center gap-2"><Clock className="h-4 w-4 text-muted-foreground" /> End Time</FormLabel>
                     <Select 
                         onValueChange={field.onChange} 
-                        value={field.value} // Use value
+                        value={field.value} 
                         disabled={!form.watch('startTime')} 
                     >
                     <FormControl>
