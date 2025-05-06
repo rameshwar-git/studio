@@ -1,12 +1,13 @@
-
 'use server';
 /**
  * @fileOverview Firebase service functions for managing booking (Firestore) and user profile data (Realtime Database).
  */
 import { db, realtimeDB } from '@/lib/firebase'; // Use db for Firestore, realtimeDB for Realtime DB
-import { collection, addDoc, query, where, getDocs, updateDoc, doc, getDoc, setDoc as setFirestoreDoc, serverTimestamp as firestoreServerTimestamp, Timestamp, orderBy } from 'firebase/firestore';
-import { ref, set as setRealtimeDB, get as getRealtimeDB, child, serverTimestamp as realtimeServerTimestamp } from "firebase/database";
+import { collection, addDoc, query, where, getDocs, updateDoc, doc, getDoc, serverTimestamp as firestoreServerTimestamp, Timestamp, orderBy, type FieldValue } from 'firebase/firestore';
+import { ref, set as setRealtimeDB, get as getRealtimeDB, serverTimestamp as realtimeServerTimestamp } from "firebase/database";
 import type { BookingFormData } from '@/components/booking-form';
+import { startOfDay, endOfDay, parse, format, setHours, setMinutes, startOfMonth, endOfMonth } from 'date-fns';
+
 
 export interface BookingRequest extends BookingFormData {
   id?: string; // Firestore document ID
@@ -18,31 +19,28 @@ export interface BookingRequest extends BookingFormData {
   userId?: string;
   rejectionReason?: string;
   aiReason?: string;
+  // For querying and availability checks
+  startTimeDate?: Date; 
+  endTimeDate?: Date;
 }
 
 export interface UserProfileData {
     name: string;
     email: string;
     department: string;
-    createdAt?: Timestamp | number; // Can be Firestore Timestamp or number from RTDB
+    createdAt?: Timestamp | number | FieldValue; 
 }
 
 const PENDING_BOOKINGS_COLLECTION = 'pendingBookings';
-// Realtime Database path for users
 const USERS_RTDB_PATH = 'users';
 
 
-/**
- * Saves user profile data to Firebase Realtime Database.
- * @param userId - The Firebase Authentication user ID.
- * @param profileData - The user profile data to save.
- */
 export async function saveUserProfile(userId: string, profileData: Omit<UserProfileData, 'createdAt'>): Promise<void> {
   try {
     const userProfileRef = ref(realtimeDB, `${USERS_RTDB_PATH}/${userId}/profile`);
     await setRealtimeDB(userProfileRef, {
         ...profileData,
-        createdAt: realtimeServerTimestamp(), // Use Realtime Database serverTimestamp
+        createdAt: realtimeServerTimestamp(), 
     });
     console.log("User profile saved to Realtime Database for user ID: ", userId);
   } catch (e: any) {
@@ -51,24 +49,28 @@ export async function saveUserProfile(userId: string, profileData: Omit<UserProf
   }
 }
 
-
-/**
- * Saves a pending booking request to Firestore.
- * @param bookingDetails - The details of the booking.
- * @param token - The unique authorization token.
- * @param userId - The ID of the user making the booking.
- * @param aiReason - The reason from AI if director approval is needed.
- * @returns The ID of the newly created Firestore document.
- */
 export async function savePendingBooking(bookingDetails: BookingFormData, token: string, userId?: string, aiReason?: string): Promise<string> {
   try {
+    const { date, startTime, endTime, ...restOfDetails } = bookingDetails;
+    
+    const bookingDateStartOfDay = startOfDay(date);
+    const [startH, startM] = startTime.split(':').map(Number);
+    const [endH, endM] = endTime.split(':').map(Number);
+
+    const startTimeDate = setMinutes(setHours(bookingDateStartOfDay, startH), startM);
+    const endTimeDate = setMinutes(setHours(bookingDateStartOfDay, endH), endM);
+
     const docRef = await addDoc(collection(db, PENDING_BOOKINGS_COLLECTION), {
-      ...bookingDetails,
+      ...restOfDetails,
+      date: Timestamp.fromDate(bookingDateStartOfDay), // Store date as Firestore Timestamp (start of day for easier date-only queries)
+      startTime, // Store as string e.g., "09:00"
+      endTime,   // Store as string e.g., "10:00"
+      startTimeDate: Timestamp.fromDate(startTimeDate), // Store full JS Date as Firestore Timestamp for precise time queries
+      endTimeDate: Timestamp.fromDate(endTimeDate),     // Store full JS Date as Firestore Timestamp
       userId: userId || null,
-      dates: Timestamp.fromDate(bookingDetails.dates), // Store date as Firestore Timestamp
       status: 'pending',
       token: token,
-      createdAt: firestoreServerTimestamp(), // Firestore serverTimestamp
+      createdAt: firestoreServerTimestamp(),
       aiReason: aiReason || null,
     });
     console.log("Pending booking saved with ID: ", docRef.id);
@@ -79,29 +81,29 @@ export async function savePendingBooking(bookingDetails: BookingFormData, token:
   }
 }
 
-/**
- * Retrieves a booking request by its authorization token from Firestore.
- * @param token - The authorization token.
- * @returns The booking request data or null if not found.
- */
-export async function getBookingByToken(token: string): Promise<BookingRequest | null> {
-  try {
-    const q = query(collection(db, PENDING_BOOKINGS_COLLECTION), where("token", "==", token));
-    const querySnapshot = await getDocs(q);
-
-    if (querySnapshot.empty) {
-      console.log("No matching booking found for token:", token);
-      return null;
+function mapDocToBookingRequest(docSnap: any): BookingRequest {
+    const data = docSnap.data();
+    const bookingDate = (data.date as Timestamp).toDate();
+    
+    let startTimeDate, endTimeDate;
+    if (data.startTime && data.endTime) {
+        const [startH, startM] = data.startTime.split(':').map(Number);
+        const [endH, endM] = data.endTime.split(':').map(Number);
+        startTimeDate = setMinutes(setHours(bookingDate, startH), startM);
+        endTimeDate = setMinutes(setHours(bookingDate, endH), endM);
     }
 
-    const docSnap = querySnapshot.docs[0];
-    const data = docSnap.data();
 
-    const bookingData: BookingRequest = {
+    return {
       id: docSnap.id,
-      studentId: data.studentId,
+      studentName: data.studentName,
+      studentEmail: data.studentEmail,
       hallPreference: data.hallPreference,
-      dates: (data.dates as Timestamp).toDate(),
+      date: bookingDate, // This is the start of the day
+      startTime: data.startTime,
+      endTime: data.endTime,
+      startTimeDate: data.startTimeDate ? (data.startTimeDate as Timestamp).toDate() : startTimeDate, // Prefer stored precise timestamp
+      endTimeDate: data.endTimeDate ? (data.endTimeDate as Timestamp).toDate() : endTimeDate,       // Prefer stored precise timestamp
       status: data.status,
       token: data.token,
       createdAt: data.createdAt,
@@ -111,35 +113,44 @@ export async function getBookingByToken(token: string): Promise<BookingRequest |
       rejectionReason: data.rejectionReason,
       aiReason: data.aiReason,
     };
-     console.log("Booking found for token:", token, bookingData);
-    return bookingData;
+}
+
+
+export async function getBookingByToken(token: string): Promise<BookingRequest | null> {
+  try {
+    const q = query(collection(db, PENDING_BOOKINGS_COLLECTION), where("token", "==", token));
+    const querySnapshot = await getDocs(q);
+
+    if (querySnapshot.empty) {
+      console.log("No matching booking found for token:", token);
+      return null;
+    }
+    // querySnapshot.docs[0] is a QueryDocumentSnapshot<DocumentData, DocumentData>
+    // It needs to be passed to mapDocToBookingRequest
+    const booking = mapDocToBookingRequest(querySnapshot.docs[0]);
+    console.log("Booking found for token:", token, booking);
+    return booking;
   } catch (e: any) {
     console.error("Error getting booking by token: ", e);
     throw new Error(`Failed to retrieve booking request: ${e.message || 'Unknown error'}`);
   }
 }
 
-/**
- * Updates the status of a booking request in Firestore by its document ID.
- * @param bookingId - The Firestore document ID of the booking.
- * @param newStatus - The new status ('approved' or 'rejected').
- * @param rejectionReason - Optional reason if status is 'rejected'.
- */
 export async function updateBookingStatus(bookingId: string, newStatus: 'approved' | 'rejected', rejectionReason?: string): Promise<void> {
   try {
     const bookingRef = doc(db, PENDING_BOOKINGS_COLLECTION, bookingId);
-    const updateData: Partial<BookingRequest> = {
+    const updateData: Partial<BookingRequest> & { approvedAt?: FieldValue, rejectedAt?: FieldValue} = { // Ensure FieldValue is part of the type
         status: newStatus,
     };
     if (newStatus === 'approved') {
-        updateData.approvedAt = firestoreServerTimestamp() as Timestamp;
-        updateData.rejectionReason = undefined;
+        updateData.approvedAt = firestoreServerTimestamp(); // Directly assign serverTimestamp
+        updateData.rejectionReason = undefined; // Clear rejection reason
     } else {
-        updateData.rejectedAt = firestoreServerTimestamp() as Timestamp;
+        updateData.rejectedAt = firestoreServerTimestamp(); // Directly assign serverTimestamp
         updateData.rejectionReason = rejectionReason || "No reason provided.";
     }
-
-    await updateDoc(bookingRef, updateData as any);
+    
+    await updateDoc(bookingRef, updateData);
     console.log(`Booking ${bookingId} status updated to ${newStatus}`);
   } catch (e: any) {
     console.error("Error updating booking status: ", e);
@@ -147,12 +158,6 @@ export async function updateBookingStatus(bookingId: string, newStatus: 'approve
   }
 }
 
-
-/**
- * Retrieves a booking request from Firestore by its document ID.
- * @param bookingId - The Firestore document ID of the booking.
- * @returns The booking request data or null if not found.
- */
 export async function getBookingById(bookingId: string): Promise<BookingRequest | null> {
     try {
       const bookingRef = doc(db, PENDING_BOOKINGS_COLLECTION, bookingId);
@@ -162,78 +167,44 @@ export async function getBookingById(bookingId: string): Promise<BookingRequest 
         console.log("No booking found for ID:", bookingId);
         return null;
       }
-
-      const data = docSnap.data();
-      const bookingData: BookingRequest = {
-        id: docSnap.id,
-        studentId: data.studentId,
-        hallPreference: data.hallPreference,
-        dates: (data.dates as Timestamp).toDate(),
-        status: data.status,
-        token: data.token,
-        createdAt: data.createdAt,
-        userId: data.userId,
-        approvedAt: data.approvedAt,
-        rejectedAt: data.rejectedAt,
-        rejectionReason: data.rejectionReason,
-        aiReason: data.aiReason,
-      };
-      console.log("Booking found for ID:", bookingId, bookingData);
-      return bookingData;
+      const booking = mapDocToBookingRequest(docSnap);
+      console.log("Booking found for ID:", bookingId, booking);
+      return booking;
     } catch (e: any) {
       console.error("Error getting booking by ID: ", e);
       throw new Error(`Failed to retrieve booking request by ID: ${e.message || 'Unknown error'}`);
     }
   }
 
-/**
- * Retrieves user profile data from Firebase Realtime Database.
- * @param userId - The Firebase Authentication user ID.
- * @returns The user profile data or null if not found.
- */
 export async function getUserProfile(userId: string): Promise<UserProfileData | null> {
     try {
         const userProfileRef = ref(realtimeDB, `${USERS_RTDB_PATH}/${userId}/profile`);
         const snapshot = await getRealtimeDB(userProfileRef);
 
         if (!snapshot.exists()) {
-            console.warn(`No user profile found in Realtime Database for ID: ${userId}. This might be expected for new users.`);
+            console.warn(`No user profile found in Realtime Database for ID: ${userId}.`);
             return null;
         }
-
-        const data = snapshot.val();
-        if (!data || !data.name || !data.email || !data.department) {
+        const data = snapshot.val() as UserProfileData; // Type assertion
+         if (!data || !data.name || !data.email || !data.department) {
             console.error(`User profile data from Realtime Database for ID ${userId} is incomplete or malformed:`, data);
             throw new Error(`Incomplete user profile data retrieved for ID ${userId}.`);
         }
-        
-        // Convert RTDB timestamp (number) to Firestore Timestamp for consistency in UserProfileData if needed,
-        // or adjust UserProfileData to expect number for createdAt from RTDB.
-        // For now, we'll return it as number, assuming frontend can handle Timestamp or number.
-        const userProfile: UserProfileData = {
-            name: data.name,
-            email: data.email,
-            department: data.department,
-            createdAt: data.createdAt, // This will be a number (milliseconds since epoch)
-        };
-        console.log("User profile found in Realtime Database for ID:", userId, userProfile);
-        return userProfile;
+        console.log("User profile found in Realtime Database for ID:", userId, data);
+        return data;
 
-    } catch (e: any) {
+    } catch (e: any) // Explicitly type e as any or Error
+     {
         console.error(`Error getting user profile from Realtime Database for ID ${userId}: `, e);
-        // Check if the error message already indicates it's one of our thrown errors.
-        if (e.message && (e.message.startsWith('Failed to retrieve user profile') || e.message.startsWith('Incomplete user profile data'))) {
+         // Check if the error is one of the specific messages we want to re-throw directly
+         if (e.message && (e.message.startsWith('Failed to retrieve user profile') || e.message.startsWith('Incomplete user profile data'))) {
              throw e; // Re-throw the specific error
         }
+        // For other errors, wrap it in a generic message
         throw new Error(`Failed to retrieve user profile. Original error: ${e.message || 'Unknown Realtime Database error'}`);
     }
 }
 
-/**
- * Retrieves all booking requests for a specific user from Firestore.
- * @param userId - The ID of the user.
- * @returns An array of booking requests.
- */
 export async function getUserBookings(userId: string): Promise<BookingRequest[]> {
   try {
     const q = query(
@@ -243,29 +214,71 @@ export async function getUserBookings(userId: string): Promise<BookingRequest[]>
     );
     const querySnapshot = await getDocs(q);
 
-    const bookings: BookingRequest[] = [];
-    querySnapshot.forEach((docSnap) => {
-      const data = docSnap.data();
-      bookings.push({
-        id: docSnap.id,
-        studentId: data.studentId,
-        hallPreference: data.hallPreference,
-        dates: (data.dates as Timestamp).toDate(),
-        status: data.status,
-        token: data.token,
-        createdAt: data.createdAt,
-        userId: data.userId,
-        approvedAt: data.approvedAt,
-        rejectedAt: data.rejectedAt,
-        rejectionReason: data.rejectionReason,
-        aiReason: data.aiReason,
-      });
-    });
+    const bookings: BookingRequest[] = querySnapshot.docs.map(mapDocToBookingRequest);
     console.log(`Found ${bookings.length} bookings for user ID: ${userId}`);
     return bookings;
   } catch (e: any) {
     console.error("Error getting user bookings: ", e);
     throw new Error(`Failed to retrieve user bookings: ${e.message || 'Unknown error'}`);
+  }
+}
+
+
+/**
+ * Retrieves all bookings for a specific hall on a specific date.
+ * This is used to check for time conflicts.
+ * @param hallPreference - The name of the hall.
+ * @param date - The specific date (JS Date object, time part will be ignored for date range).
+ * @returns An array of booking requests for that hall and date.
+ */
+export async function getHallBookingsForDate(hallPreference: string, date: Date): Promise<BookingRequest[]> {
+  try {
+    const dayStart = Timestamp.fromDate(startOfDay(date));
+    const dayEnd = Timestamp.fromDate(endOfDay(date));
+
+    const q = query(
+      collection(db, PENDING_BOOKINGS_COLLECTION),
+      where("hallPreference", "==", hallPreference),
+      where("date", ">=", dayStart), // Using the 'date' field which is start of day
+      where("date", "<=", dayEnd),   // Using the 'date' field which is start of day
+      where("status", "in", ["pending", "approved"]) // Only consider active/pending bookings
+    );
+    const querySnapshot = await getDocs(q);
+    const bookings: BookingRequest[] = querySnapshot.docs.map(mapDocToBookingRequest);
+    console.log(`Found ${bookings.length} bookings for hall '${hallPreference}' on ${format(date, 'PPP')}`);
+    return bookings;
+  } catch (e: any) {
+    console.error(`Error getting bookings for hall ${hallPreference} on date ${date}: `, e);
+    throw new Error(`Failed to retrieve hall bookings for date: ${e.message || 'Unknown error'}`);
+  }
+}
+
+/**
+ * Retrieves all bookings for all halls within a given month.
+ * This is used for populating the venue availability calendar.
+ * @param year - The year (e.g., 2024).
+ * @param month - The month (0-indexed, e.g., 0 for January).
+ * @returns An array of all booking requests for that month.
+ */
+export async function getVenueAvailabilityForMonth(year: number, month: number): Promise<BookingRequest[]> {
+  try {
+    const dateInMonth = new Date(year, month, 1);
+    const monthStart = Timestamp.fromDate(startOfMonth(dateInMonth));
+    const monthEnd = Timestamp.fromDate(endOfMonth(dateInMonth));
+
+    const q = query(
+      collection(db, PENDING_BOOKINGS_COLLECTION),
+      where("date", ">=", monthStart),
+      where("date", "<=", monthEnd),
+      where("status", "in", ["pending", "approved"]) // Only consider active/pending bookings
+    );
+    const querySnapshot = await getDocs(q);
+    const bookings: BookingRequest[] = querySnapshot.docs.map(mapDocToBookingRequest);
+    console.log(`Found ${bookings.length} total bookings for ${format(dateInMonth, 'MMMM yyyy')}`);
+    return bookings;
+  } catch (e: any) {
+    console.error(`Error getting venue availability for month ${month + 1}/${year}: `, e);
+    throw new Error(`Failed to retrieve venue availability: ${e.message || 'Unknown error'}`);
   }
 }
 

@@ -1,3 +1,4 @@
+
 'use client';
 
 import * as React from 'react';
@@ -7,8 +8,8 @@ import { sendConfirmationEmail } from '@/services/email';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Loader2, CheckCircle, XCircle, User, Building, CalendarDays, AlertTriangle, Info, MessageSquare } from 'lucide-react';
-import { format } from 'date-fns';
+import { Loader2, CheckCircle, XCircle, User, Building, CalendarDays, AlertTriangle, Info, MessageSquare, Clock, Mail } from 'lucide-react';
+import { format, parse } from 'date-fns';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 
@@ -41,7 +42,7 @@ export default function ApprovalPage() {
            if (fetchedBooking.status === 'pending') {
             setStatus('pending');
            } else {
-             setStatus('already_processed'); 
+             setStatus('already_processed');
            }
         } else {
           setStatus('not_found');
@@ -64,27 +65,26 @@ export default function ApprovalPage() {
 
     if (action === 'reject' && !rejectionReason.trim() && showRejectionInput) {
         setError("Please provide a reason for rejection.");
-        // Clear error after a delay so user can see it
         setTimeout(() => setError(null), 3000);
         return;
     }
     if (action === 'reject' && !showRejectionInput) {
         setShowRejectionInput(true);
-        setError(null); // Clear any previous errors
-        return; 
+        setError(null);
+        return;
     }
 
 
     setProcessingAction(action);
-    setError(null); 
+    setError(null);
 
     try {
       await updateBookingStatus(booking.id, action === 'approve' ? 'approved' : 'rejected', action === 'reject' ? rejectionReason : undefined);
       setStatus(action === 'approve' ? 'approved' : 'rejected');
-      
-      // Ensure booking.studentId is used for the email 'to' field. In a real app, this might be booking.userEmail
-      const studentEmail = booking.studentId.includes('@') ? booking.studentId : `${booking.studentId}@example.com`; // Basic check or use a stored email
-      await sendConfirmationEmail(studentEmail, action === 'approve' ? 'approved' : 'rejected', booking, action === 'reject' ? rejectionReason : undefined);
+
+      // Send confirmation to student
+      // booking.studentEmail should exist from BookingFormData
+      await sendConfirmationEmail(booking.studentEmail, action === 'approve' ? 'approved' : 'rejected', booking, action === 'reject' ? rejectionReason : undefined);
 
 
     } catch (e: any) {
@@ -93,9 +93,16 @@ export default function ApprovalPage() {
       setError(`Failed to ${action} booking: ${e.message}`);
     } finally {
       setProcessingAction(null);
-      // Do not hide rejection input here immediately, let the status change re-render the view
     }
   };
+
+   const formatTimeDisplay = (timeString?: string) => {
+      if (!timeString) return 'N/A';
+      const [hours, minutes] = timeString.split(':');
+      const tempDate = new Date(2000, 0, 1, parseInt(hours), parseInt(minutes));
+      return format(tempDate, 'p'); // e.g., 9:00 AM
+    };
+
 
    const renderContent = () => {
      switch (status) {
@@ -119,14 +126,16 @@ export default function ApprovalPage() {
          );
 
         case 'already_processed':
+          const processedDate = booking?.status === 'approved' ? booking.approvedAt : booking?.rejectedAt;
+          const dateToShow = processedDate instanceof Date ? processedDate : processedDate?.toDate();
+
           return (
              <Alert variant={booking?.status === 'approved' ? 'default' : 'destructive'} className={booking?.status === 'approved' ? 'border-green-500 bg-green-50' : 'border-destructive bg-destructive/10'}>
                {booking?.status === 'approved' ? <CheckCircle className="h-4 w-4 text-green-600" /> : <XCircle className="h-4 w-4 text-destructive"/>}
               <AlertTitle>Booking Already Processed</AlertTitle>
               <AlertDescription>
                  This booking request was already <strong>{booking?.status}</strong>
-                 {booking?.approvedAt && ` on ${format(booking.approvedAt.toDate(), 'PPP p')}`}.
-                 {booking?.rejectedAt && ` on ${format(booking.rejectedAt.toDate(), 'PPP p')}`}.
+                 {dateToShow && ` on ${format(dateToShow, 'PPP p')}`}.
                  {booking?.status === 'rejected' && booking.rejectionReason && <p className="mt-1">Reason: {booking.rejectionReason}</p>}
                  <br/> No further action is needed.
               </AlertDescription>
@@ -180,7 +189,11 @@ export default function ApprovalPage() {
                <div className="space-y-2 rounded-md border p-4">
                   <p className="flex items-center gap-2">
                     <User className="h-4 w-4 text-muted-foreground" />
-                    <strong>Student ID/Email:</strong> {booking.studentId}
+                    <strong>Student Name:</strong> {booking.studentName}
+                  </p>
+                   <p className="flex items-center gap-2">
+                    <Mail className="h-4 w-4 text-muted-foreground" />
+                    <strong>Student Email:</strong> {booking.studentEmail}
                   </p>
                   <p className="flex items-center gap-2">
                     <Building className="h-4 w-4 text-muted-foreground" />
@@ -188,7 +201,11 @@ export default function ApprovalPage() {
                   </p>
                   <p className="flex items-center gap-2">
                     <CalendarDays className="h-4 w-4 text-muted-foreground" />
-                    <strong>Date:</strong> {format(booking.dates, 'PPP')}
+                    <strong>Date:</strong> {format(booking.date, 'PPP')}
+                  </p>
+                  <p className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-muted-foreground" />
+                    <strong>Time:</strong> {formatTimeDisplay(booking.startTime)} - {formatTimeDisplay(booking.endTime)}
                   </p>
                 </div>
                 {booking.aiReason && (
@@ -196,7 +213,7 @@ export default function ApprovalPage() {
                       <Info className="h-4 w-4 text-blue-600"/>
                      <AlertTitle className="text-blue-700">AI Recommendation Note</AlertTitle>
                      <AlertDescription className="text-blue-600">
-                         Approval by director was suggested by AI due to: {booking.aiReason}
+                         {booking.aiReason}
                      </AlertDescription>
                  </Alert>
                 )}
@@ -211,7 +228,7 @@ export default function ApprovalPage() {
                             value={rejectionReason}
                             onChange={(e) => {
                                 setRejectionReason(e.target.value);
-                                if (error && e.target.value.trim()) setError(null); // Clear error when user types
+                                if (error && e.target.value.trim()) setError(null);
                             }}
                             placeholder="Explain why the request is being rejected..."
                             className="min-h-[80px]"
@@ -239,7 +256,7 @@ export default function ApprovalPage() {
                   )}
                  {showRejectionInput ? 'Confirm Rejection' : 'Reject Request'}
                </Button>
-               {!showRejectionInput && ( // Only show approve if not in rejection input mode
+               {!showRejectionInput && (
                 <Button
                     variant="default"
                     className="bg-green-600 hover:bg-green-700 w-full sm:w-auto"
@@ -271,4 +288,3 @@ export default function ApprovalPage() {
     </main>
   );
 }
-

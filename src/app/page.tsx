@@ -1,3 +1,4 @@
+
 'use client';
 
 import * as React from 'react';
@@ -5,29 +6,30 @@ import Link from 'next/link';
 import type {BookingFormData} from '@/components/booking-form';
 import {BookingForm} from '@/components/booking-form';
 import {BookingConfirmation} from '@/components/booking-confirmation';
+import {VenueCalendar} from '@/components/venue-calendar';
 import type {AuthorizeBookingOutput} from '@/ai/flows/authorize-booking';
-import { savePendingBooking, getUserProfile, type UserProfileData, getUserBookings, type BookingRequest } from '@/services/firestore';
+import { savePendingBooking, getUserProfile, type UserProfileData, getUserBookings, type BookingRequest, getVenueAvailabilityForMonth } from '@/services/firestore';
 import { auth } from '@/lib/firebase';
-import { sendApprovalEmail } from '@/services/email'; 
-import crypto from 'crypto'; 
-import { useAuth } from '@/context/AuthContext'; 
-import { Button } from '@/components/ui/button'; 
-import { LogIn, Loader2, User, ListChecks, Hourglass, CheckSquare, XSquare, Info, PlusCircle, AlertTriangle } from 'lucide-react';
+import { sendApprovalEmail } from '@/services/email';
+import crypto from 'crypto';
+import { useAuth } from '@/context/AuthContext';
+import { Button } from '@/components/ui/button';
+import { LogIn, Loader2, User, ListChecks, Hourglass, CheckSquare, XSquare, Info, PlusCircle, AlertTriangle, CalendarDays, Clock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { format } from 'date-fns';
+import { format, parse } from 'date-fns';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 
 interface BookingResult extends AuthorizeBookingOutput {
   formData: BookingFormData;
-  bookingId?: string; 
-  token?: string; 
+  bookingId?: string;
+  token?: string;
 }
 
 export default function Home() {
-  const { user, loading: authLoading } = useAuth(); 
+  const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
   const [bookingResult, setBookingResult] = React.useState<BookingResult | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
@@ -37,30 +39,38 @@ export default function Home() {
   const [userBookings, setUserBookings] = React.useState<BookingRequest[]>([]);
   const [bookingsLoading, setBookingsLoading] = React.useState(false);
   const [showBookingForm, setShowBookingForm] = React.useState(false);
+  const [venueBookings, setVenueBookings] = React.useState<BookingRequest[]>([]);
+  const [calendarMonth, setCalendarMonth] = React.useState(new Date());
 
 
    React.useEffect(() => {
-    async function fetchUserData() {
+    async function fetchUserDataAndVenueBookings() {
       if (user) {
         setProfileLoading(true);
         setBookingsLoading(true);
-        setShowBookingForm(false); 
-        setBookingResult(null); 
-        setError(null); 
+        setShowBookingForm(false);
+        setBookingResult(null);
+        setError(null);
         try {
-          const profile = await getUserProfile(user.uid); 
+          const profile = await getUserProfile(user.uid);
           setUserProfile(profile);
-          
-          const bookings = await getUserBookings(user.uid); 
+
+          const bookings = await getUserBookings(user.uid);
           setUserBookings(bookings);
 
+          const venueData = await getVenueAvailabilityForMonth(calendarMonth.getFullYear(), calendarMonth.getMonth());
+          setVenueBookings(venueData);
+
+
         } catch (err: any) {
-          console.error("Failed to fetch user data:", err);
-          let specificError = "Could not load your information at this time.";
-          if (err.message && err.message.toLowerCase().includes('profile')) {
-            specificError = "Could not load your profile. It might not exist or there was a connection issue.";
+          console.error("Failed to fetch user/venue data:", err);
+          let specificError = "Could not load your information or venue availability at this time.";
+           if (err.message && err.message.toLowerCase().includes('profile')) {
+            specificError = "Could not load your profile.";
           } else if (err.message && err.message.toLowerCase().includes('bookings')) {
-            specificError = "Could not load your booking information due to a connection issue.";
+            specificError = "Could not load your booking information.";
+          } else if (err.message && err.message.toLowerCase().includes('venue')) {
+            specificError = "Could not load venue availability.";
           }
           setError(specificError);
           toast({
@@ -73,19 +83,20 @@ export default function Home() {
           setBookingsLoading(false);
         }
       } else {
-        setUserProfile(null); 
+        setUserProfile(null);
         setUserBookings([]);
+        setVenueBookings([]);
         setShowBookingForm(false);
         setBookingResult(null);
         setError(null);
       }
     }
-    fetchUserData();
-  }, [user, toast]);
+    fetchUserDataAndVenueBookings();
+  }, [user, toast, calendarMonth]);
 
 
   const handleBookingSubmit = async (result: BookingResult | null, errorMsg?: string) => {
-    setError(errorMsg || null); 
+    setError(errorMsg || null);
 
     if (result && !errorMsg) {
       if (!user) {
@@ -101,38 +112,53 @@ export default function Home() {
 
         const aiReasonForDecision = result.reason;
 
-        if (result.requiresDirectorApproval) {
-          tokenValue = crypto.randomBytes(32).toString('hex');
-          bookingId = await savePendingBooking(result.formData, tokenValue, user.uid, aiReasonForDecision);
 
-          const directorEmail = process.env.NEXT_PUBLIC_DIRECTOR_EMAIL || 'director@example.com'; 
+        tokenValue = crypto.randomBytes(32).toString('hex');
+        bookingId = await savePendingBooking(result.formData, tokenValue, user.uid, aiReasonForDecision);
+
+        if (result.requiresDirectorApproval) {
+          const directorEmail = process.env.NEXT_PUBLIC_DIRECTOR_EMAIL || 'director@example.com';
           if (!directorEmail) {
-             throw new Error("Director email is not configured.");
+             console.warn("Director email is not configured. Approval email not sent.");
+             // Not throwing error to allow booking to proceed, but log it.
+          } else {
+            await sendApprovalEmail(directorEmail, tokenValue, result.formData);
           }
-          await sendApprovalEmail(directorEmail, tokenValue, result.formData);
         } else {
-           tokenValue = crypto.randomBytes(32).toString('hex'); 
-           bookingId = await savePendingBooking(result.formData, tokenValue, user.uid, aiReasonForDecision);
-           console.log("Booking auto-processed by AI:", result.formData, "Reason:", aiReasonForDecision);
+           console.log("Booking auto-processed by AI (or does not require director approval):", result.formData, "Reason:", aiReasonForDecision);
+           // If not requiring director approval, it's saved as 'pending' but AI might suggest it's clear.
+           // The actual approval still happens via the director link or an admin panel.
+           // For this app, "auto-approved" means the AI didn't flag it for mandatory director review.
         }
-        
+
         setBookingResult({ ...result, bookingId, token: tokenValue });
-        
-        if (user) { 
+
+        if (user) {
             const updatedBookings = await getUserBookings(user.uid);
             setUserBookings(updatedBookings);
+            const updatedVenueBookings = await getVenueAvailabilityForMonth(calendarMonth.getFullYear(), calendarMonth.getMonth());
+            setVenueBookings(updatedVenueBookings);
         }
-        setShowBookingForm(false); 
-        setError(null); 
+        setShowBookingForm(false);
+        setError(null);
 
       } catch (dbError: any) {
          console.error("Error during booking process:", dbError);
          setError(`Failed to process booking: ${dbError.message}`);
-         setBookingResult(null); 
+         setBookingResult(null);
       } finally {
-        setIsLoading(false); 
+        setIsLoading(false);
       }
     } else {
+      // If there was an error message from BookingForm (e.g. availability)
+      if (errorMsg) {
+        setError(errorMsg); // Display error from form.
+        toast({
+            title: 'Booking Error',
+            description: errorMsg,
+            variant: 'destructive',
+        });
+      }
       setBookingResult(null);
       setIsLoading(false);
     }
@@ -145,6 +171,13 @@ export default function Home() {
       setBookingResult(null);
       setError(null);
     }
+  };
+
+  const formatTimeDisplay = (timeString?: string) => {
+    if (!timeString) return 'N/A';
+    const [hours, minutes] = timeString.split(':');
+    const tempDate = new Date(2000, 0, 1, parseInt(hours), parseInt(minutes));
+    return format(tempDate, 'p'); // e.g., 9:00 AM
   };
 
   const pendingBookings = userBookings.filter(b => b.status === 'pending');
@@ -192,7 +225,7 @@ export default function Home() {
       <Button
           variant="outline"
           onClick={async () => {
-            if (auth) { 
+            if (auth) {
               await auth.signOut();
               toast({ title: 'Logged Out', description: 'You have been successfully logged out.' });
             }
@@ -202,7 +235,7 @@ export default function Home() {
           Logout
         </Button>
 
-      <div className="w-full max-w-3xl space-y-8">
+      <div className="w-full max-w-4xl space-y-8">
         {userProfile && !profileLoading && (
             <div className="text-center">
                 <h1 className="text-3xl font-bold text-primary">Welcome, {userProfile.name}!</h1>
@@ -214,19 +247,35 @@ export default function Home() {
                 <Info className="h-4 w-4 text-blue-600"/>
                 <AlertTitle className="text-blue-700">Profile Information</AlertTitle>
                 <AlertDescription className="text-blue-600">
-                    Your user profile could not be loaded. If you just registered, it might still be syncing. Otherwise, please contact support if this persists.
+                    Your user profile could not be loaded. This might be temporary.
                 </AlertDescription>
             </Alert>
         )}
 
+        {!showBookingForm && !bookingResult && !error && !isLoading && (
+          <Card className="mt-6">
+              <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                     <CalendarDays className="h-6 w-6 text-primary" /> Venue Availability Calendar
+                  </CardTitle>
+                  <CardDescription>Green indicates dates with some availability. Red indicates dates that are fully booked. Select a date on the calendar or use the form below.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                  <VenueCalendar
+                    bookings={venueBookings}
+                    currentMonth={calendarMonth}
+                    onMonthChange={setCalendarMonth}
+                  />
+                  <p className="mt-2 text-xs text-muted-foreground">Note: Calendar shows general availability. Specific time slot conflicts are checked during booking.</p>
+              </CardContent>
+          </Card>
+        )}
 
-        {/* This block shows summary/no-history and lists if applicable */}
-        {/* It's visible when not showing the form, not loading, no result, and bookings data loaded */}
+
         {!showBookingForm && !bookingResult && !error && !isLoading && !bookingsLoading && (
-          <div className="space-y-6"> 
+          <div className="space-y-6">
             {userBookings.length > 0 ? (
               <>
-                {/* Booking Summary Card */}
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -250,7 +299,6 @@ export default function Home() {
                   </CardContent>
                 </Card>
 
-                {/* Lists of Bookings */}
                 {pendingBookings.length > 0 && (
                     <Card>
                         <CardHeader>
@@ -262,7 +310,8 @@ export default function Home() {
                             {pendingBookings.map(booking => (
                                 <div key={booking.id} className="rounded-md border p-3">
                                     <p><strong>Hall:</strong> {booking.hallPreference}</p>
-                                    <p><strong>Date:</strong> {format(booking.dates, 'PPP')}</p>
+                                    <p><strong>Date:</strong> {format(booking.date, 'PPP')}</p>
+                                    <p><strong>Time:</strong> {formatTimeDisplay(booking.startTime)} - {formatTimeDisplay(booking.endTime)}</p>
                                     <p><strong>Submitted:</strong> {format(booking.createdAt.toDate(), 'Pp')}</p>
                                     {booking.aiReason && (
                                       <Alert variant="default" className="mt-2 bg-blue-50 border-blue-300">
@@ -289,7 +338,8 @@ export default function Home() {
                             {approvedBookings.map(booking => (
                                 <div key={booking.id} className="rounded-md border p-3">
                                     <p><strong>Hall:</strong> {booking.hallPreference}</p>
-                                    <p><strong>Date:</strong> {format(booking.dates, 'PPP')}</p>
+                                    <p><strong>Date:</strong> {format(booking.date, 'PPP')}</p>
+                                    <p><strong>Time:</strong> {formatTimeDisplay(booking.startTime)} - {formatTimeDisplay(booking.endTime)}</p>
                                     {booking.approvedAt && <p><strong>Approved:</strong> {format(booking.approvedAt.toDate(), 'Pp')}</p>}
                                 </div>
                             ))}
@@ -307,7 +357,8 @@ export default function Home() {
                             {rejectedBookings.map(booking => (
                                 <div key={booking.id} className="rounded-md border p-3">
                                     <p><strong>Hall:</strong> {booking.hallPreference}</p>
-                                    <p><strong>Date:</strong> {format(booking.dates, 'PPP')}</p>
+                                    <p><strong>Date:</strong> {format(booking.date, 'PPP')}</p>
+                                    <p><strong>Time:</strong> {formatTimeDisplay(booking.startTime)} - {formatTimeDisplay(booking.endTime)}</p>
                                     {booking.rejectedAt && <p><strong>Processed:</strong> {format(booking.rejectedAt.toDate(), 'Pp')}</p>}
                                     {booking.rejectionReason && <p><strong>Reason:</strong> {booking.rejectionReason}</p>}
                                 </div>
@@ -317,8 +368,7 @@ export default function Home() {
                 )}
               </>
             ) : (
-              // No bookings yet message
-              <Card> 
+              <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Info className="h-6 w-6 text-primary" />
@@ -337,15 +387,14 @@ export default function Home() {
             )}
           </div>
         )}
-        
-        {/* "Make New Booking" / "Cancel Booking" Button */}
+
         {!bookingResult && !error && !isLoading && (
             <div className="text-center mt-6">
-                 <Button 
+                 <Button
                     onClick={() => {
                         setShowBookingForm(prev => !prev);
-                        setBookingResult(null); 
-                        setError(null); 
+                        setBookingResult(null);
+                        setError(null);
                     }}
                     variant={showBookingForm ? "outline" : "default"}
                     className="w-full sm:w-auto"
@@ -353,7 +402,7 @@ export default function Home() {
                     {showBookingForm ? (
                         <> <XSquare className="mr-2 h-4 w-4" /> Cancel New Booking</>
                     ) : (
-                        <> <PlusCircle className="mr-2 h-4 w-4" /> 
+                        <> <PlusCircle className="mr-2 h-4 w-4" />
                          {userBookings.length === 0 ? "Make Your First Booking Request" : "Make a New Booking Request"}
                         </>
                     )}
@@ -361,25 +410,24 @@ export default function Home() {
             </div>
         )}
 
-        {/* Booking Form */}
-        {showBookingForm && !bookingResult && !error && !isLoading && ( 
+        {showBookingForm && !bookingResult && !error && !isLoading && (
           <Card className="mt-6">
             <CardHeader>
                 <CardTitle>New Hall Booking Request</CardTitle>
-                <CardDescription>Fill in the details below to book a hall.</CardDescription>
+                <CardDescription>Fill in the details below to book a hall. A 1-hour gap is maintained between bookings.</CardDescription>
             </CardHeader>
             <CardContent>
                 <BookingForm
                     onSubmitSuccess={handleBookingSubmit}
                     onLoadingChange={handleLoadingChange}
-                    isLoading={isLoading} 
-                    defaultStudentId={userProfile?.email || user?.email || ''}
+                    isLoading={isLoading}
+                    userProfile={userProfile}
                 />
             </CardContent>
           </Card>
         )}
 
-         {isLoading && ( 
+         {isLoading && (
           <div className="flex flex-col items-center justify-center rounded-md border bg-card p-6 text-center shadow-sm mt-6">
              <Loader2 className="mr-3 h-8 w-8 animate-spin text-primary" />
             <p className="mt-2 text-lg font-semibold text-foreground">Processing Request...</p>
@@ -390,17 +438,17 @@ export default function Home() {
         )}
 
 
-        {bookingResult && !isLoading && ( 
+        {bookingResult && !isLoading && (
           <div className="mt-6">
             <BookingConfirmation
                 bookingDetails={bookingResult.formData}
                 authorization={bookingResult}
-                bookingId={bookingResult.bookingId} 
+                bookingId={bookingResult.bookingId}
             />
           </div>
         )}
 
-        {error && !isLoading && ( 
+        {error && !isLoading && !bookingResult && ( // Only show general error if no specific booking result error shown in form
           <Alert variant="destructive" className="mt-6">
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle>Error</AlertTitle>
@@ -408,18 +456,18 @@ export default function Home() {
           </Alert>
         )}
 
-        {(bookingResult || error || showBookingForm) && !isLoading && ( 
+        {(bookingResult || error || showBookingForm) && !isLoading && (
            <div className="text-center mt-6">
             <Button
                 onClick={() => {
                 setBookingResult(null);
                 setError(null);
-                setShowBookingForm(false); 
+                setShowBookingForm(false);
                 }}
                 variant="outline"
                 className="w-full sm:w-auto"
             >
-                {showBookingForm && !bookingResult && !error ? 'Back to Summary' : 'View Booking Summary / Make Another'}
+                {showBookingForm && !bookingResult && !error ? 'Back to Summary & Calendar' : 'View Summary & Calendar'}
             </Button>
            </div>
         )}

@@ -4,6 +4,7 @@
  */
 
 import type { BookingFormData } from "@/components/booking-form"; // Adjust path as needed
+import { format as formatDateFn, parse } from 'date-fns'; // Renamed to avoid conflict
 
 /**
  * Simulates sending an approval email to the director.
@@ -11,20 +12,29 @@ import type { BookingFormData } from "@/components/booking-form"; // Adjust path
  * @param token - The unique authorization token.
  * @param bookingDetails - The details of the booking request.
  */
-export async function sendApprovalEmail(to: string, token: string, bookingDetails: BookingFormData): Promise<void> {
+export async function sendApprovalEmail(to: string, token: string, bookingDetails: BookingFormData): Promise&lt;void&gt; {
   const approvalLink = `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'}/approve/${token}`; // Ensure you have BASE_URL in your env
 
-  const emailSubject = `Booking Request Approval Needed: ${bookingDetails.studentId} - ${bookingDetails.hallPreference}`;
+  const formatTime = (timeString: string) =&gt; {
+    if (!timeString) return 'N/A';
+    const [hours, minutes] = timeString.split(':');
+    const tempDate = new Date(2000, 0, 1, parseInt(hours), parseInt(minutes));
+    return formatDateFn(tempDate, 'p');
+  };
+
+  const emailSubject = `Booking Request Approval Needed: ${bookingDetails.studentEmail} - ${bookingDetails.hallPreference}`;
   const emailBody = `
-    <p>A new hall booking request requires your approval:</p>
-    <ul>
-      <li><strong>Student ID:</strong> ${bookingDetails.studentId}</li>
-      <li><strong>Hall Preference:</strong> ${bookingDetails.hallPreference}</li>
-      <li><strong>Date:</strong> ${bookingDetails.dates.toLocaleDateString()}</li>
-    </ul>
-    <p>Please review the request and approve or reject it by clicking the link below:</p>
-    <p><a href="${approvalLink}">Review Booking Request</a></p>
-    <p>Link: ${approvalLink}</p>
+    &lt;p&gt;A new hall booking request requires your approval:&lt;/p&gt;
+    &lt;ul&gt;
+      &lt;li&gt;&lt;strong&gt;Student Name:&lt;/strong&gt; ${bookingDetails.studentName}&lt;/li&gt;
+      &lt;li&gt;&lt;strong&gt;Student Email:&lt;/strong&gt; ${bookingDetails.studentEmail}&lt;/li&gt;
+      &lt;li&gt;&lt;strong&gt;Hall Preference:&lt;/strong&gt; ${bookingDetails.hallPreference}&lt;/li&gt;
+      &lt;li&gt;&lt;strong&gt;Date:&lt;/strong&gt; ${formatDateFn(bookingDetails.date, 'PPP')}&lt;/li&gt;
+      &lt;li&gt;&lt;strong&gt;Time:&lt;/strong&gt; ${formatTime(bookingDetails.startTime)} - ${formatTime(bookingDetails.endTime)}&lt;/li&gt;
+    &lt;/ul&gt;
+    &lt;p&gt;Please review the request and approve or reject it by clicking the link below:&lt;/p&gt;
+    &lt;p&gt;&lt;a href="${approvalLink}"&gt;Review Booking Request&lt;/a&gt;&lt;/p&gt;
+    &lt;p&gt;Link: ${approvalLink}&lt;/p&gt;
   `;
 
   console.log("--- SIMULATING EMAIL ---");
@@ -32,30 +42,7 @@ export async function sendApprovalEmail(to: string, token: string, bookingDetail
   console.log("Subject:", emailSubject);
   console.log("Body:", emailBody);
   console.log("--- END SIMULATING EMAIL ---");
-
-  // In a real application, you would use an email sending library here:
-  // e.g., using SendGrid:
-  // const sgMail = require('@sendgrid/mail');
-  // sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-  // const msg = {
-  //   to: to,
-  //   from: 'noreply@yourdomain.com', // Use a verified sender
-  //   subject: emailSubject,
-  //   html: emailBody,
-  // };
-  // try {
-  //   await sgMail.send(msg);
-  //   console.log('Approval email sent successfully');
-  // } catch (error) {
-  //   console.error('Error sending approval email:', error);
-  //   if (error.response) {
-  //     console.error(error.response.body)
-  //   }
-  //   throw new Error('Failed to send approval email.');
-  // }
-
-  // For simulation purposes, we just log the details.
-  await new Promise(resolve => setTimeout(resolve, 500)); // Simulate network delay
+  await new Promise(resolve =&gt; setTimeout(resolve, 500)); 
 }
 
 /**
@@ -65,31 +52,39 @@ export async function sendApprovalEmail(to: string, token: string, bookingDetail
  * @param bookingDetails - The details of the booking request.
  * @param reason - Optional reason for rejection.
  */
-export async function sendConfirmationEmail(to: string, status: 'approved' | 'rejected', bookingDetails: BookingFormData, reason?: string): Promise<void> {
-    const emailSubject = `Booking Request Update: ${bookingDetails.hallPreference} on ${bookingDetails.dates.toLocaleDateString()}`;
+export async function sendConfirmationEmail(to: string, status: 'approved' | 'rejected', bookingDetails: BookingFormData, reason?: string): Promise&lt;void&gt; {
+    const formatTime = (timeString: string) =&gt; {
+        if (!timeString) return 'N/A';
+        const [hours, minutes] = timeString.split(':');
+        const tempDate = new Date(2000, 0, 1, parseInt(hours), parseInt(minutes));
+        return formatDateFn(tempDate, 'p');
+    };
+    
+    const emailSubject = `Booking Request Update: ${bookingDetails.hallPreference} on ${formatDateFn(bookingDetails.date, 'PPP')}`;
     let emailBody = `
-      <p>Your hall booking request has been updated:</p>
-      <ul>
-        <li><strong>Student ID:</strong> ${bookingDetails.studentId}</li>
-        <li><strong>Hall Preference:</strong> ${bookingDetails.hallPreference}</li>
-        <li><strong>Date:</strong> ${bookingDetails.dates.toLocaleDateString()}</li>
-        <li><strong>Status:</strong> ${status === 'approved' ? 'Approved' : 'Rejected'}</li>
-      </ul>
+      &lt;p&gt;Your hall booking request for &lt;strong&gt;${bookingDetails.hallPreference}&lt;/strong&gt; has been updated:&lt;/p&gt;
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;Student Name:&lt;/strong&gt; ${bookingDetails.studentName}&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Student Email:&lt;/strong&gt; ${bookingDetails.studentEmail}&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Hall Preference:&lt;/strong&gt; ${bookingDetails.hallPreference}&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Date:&lt;/strong&gt; ${formatDateFn(bookingDetails.date, 'PPP')}&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Time:&lt;/strong&gt; ${formatTime(bookingDetails.startTime)} - ${formatTime(bookingDetails.endTime)}&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Status:&lt;/strong&gt; ${status === 'approved' ? 'Approved' : 'Rejected'}&lt;/li&gt;
+      &lt;/ul&gt;
     `;
 
-    if (status === 'rejected' && reason) {
-        emailBody += `<p><strong>Reason for Rejection:</strong> ${reason}</p>`;
+    if (status === 'rejected' &amp;&amp; reason) {
+        emailBody += `&lt;p&gt;&lt;strong&gt;Reason for Rejection:&lt;/strong&gt; ${reason}&lt;/p&gt;`;
     } else if (status === 'approved') {
-         emailBody += `<p>Your booking is confirmed. Please contact the administration for any further details.</p>`;
+         emailBody += `&lt;p&gt;Your booking is confirmed. Please contact the administration for any further details.&lt;/p&gt;`;
     }
 
 
     console.log("--- SIMULATING STUDENT CONFIRMATION EMAIL ---");
-    console.log("To:", to); // Note: We don't have student email in the form, using placeholder
+    console.log("To:", to); 
     console.log("Subject:", emailSubject);
     console.log("Body:", emailBody);
     console.log("--- END SIMULATING STUDENT CONFIRMATION EMAIL ---");
 
-    // Add real email sending logic here as in sendApprovalEmail
-     await new Promise(resolve => setTimeout(resolve, 500)); // Simulate network delay
+     await new Promise(resolve =&gt; setTimeout(resolve, 500)); 
 }

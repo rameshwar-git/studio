@@ -88,3 +88,30 @@ body {
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
+
+/* Custom styles for calendar day availability */
+.day-available .rdp-button_disabled {
+  /* Ensure disabled styles don't override availability indication */
+  opacity: 1 !important; 
+}
+.day-available button {
+  background-color: #D1FAE5 !important; /* Tailwind green-100 */
+  color: #065F46 !important; /* Tailwind green-800 */
+  border: 1px solid #6EE7B7 !important; /* Tailwind green-300 */
+}
+.day-available button:hover {
+  background-color: #A7F3D0 !important; /* Tailwind green-200 */
+}
+
+.day-fully-booked .rdp-button_disabled {
+   opacity: 1 !important;
+}
+.day-fully-booked button {
+  background-color: #FEE2E2 !important; /* Tailwind red-100 */
+  color: #991B1B !important; /* Tailwind red-800 */
+  border: 1px solid #FCA5A5 !important; /* Tailwind red-300 */
+  /* text-decoration: line-through; */
+}
+.day-fully-booked button:hover {
+   background-color: #FECACA !important; /* Tailwind red-200 */
+}
