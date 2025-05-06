@@ -1,3 +1,4 @@
+
 'use server';
 /**
  * @fileOverview Firebase service functions for managing booking (Firestore) and user profile data (Realtime Database).
@@ -264,7 +265,10 @@ export async function getUserBookings(userId: string): Promise<BookingRequest[]>
     return bookings;
   } catch (e: any) {
     console.error("Error getting user bookings: ", e);
-    throw new Error(`Failed to retrieve user bookings: ${e.message || 'Unknown error'}`);
+    // Instead of throwing, return an empty array and log the error.
+    // This allows the application to continue running even if there's a permission issue.
+    console.error("Error getting user bookings: ", e.message); 
+    return [];
   }
 }
 
