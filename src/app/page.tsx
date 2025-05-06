@@ -1,4 +1,3 @@
-
 'use client';
 
 import * as React from 'react';
@@ -49,10 +48,10 @@ export default function Home() {
         setBookingResult(null); 
         setError(null); 
         try {
-          const profile = await getUserProfile(user.uid); // getUserProfile now fetches from Realtime DB
+          const profile = await getUserProfile(user.uid); 
           setUserProfile(profile);
           
-          const bookings = await getUserBookings(user.uid); // Bookings are still from Firestore
+          const bookings = await getUserBookings(user.uid); 
           setUserBookings(bookings);
 
         } catch (err: any) {
@@ -221,33 +220,37 @@ export default function Home() {
         )}
 
 
+        {/* This block shows summary/no-history and lists if applicable */}
+        {/* It's visible when not showing the form, not loading, no result, and bookings data loaded */}
         {!showBookingForm && !bookingResult && !error && !isLoading && !bookingsLoading && (
-          <Card>
-              <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
+          <div className="space-y-6"> 
+            {userBookings.length > 0 ? (
+              <>
+                {/* Booking Summary Card */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
                       <ListChecks className="h-6 w-6 text-primary" />
                       Your Booking Summary
-                  </CardTitle>
-              </CardHeader>
-              <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                  <div className="rounded-md border p-4 text-center">
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <div className="rounded-md border p-4 text-center">
                       <p className="text-2xl font-bold">{userBookings.length}</p>
                       <p className="text-sm text-muted-foreground">Total Bookings</p>
-                  </div>
-                  <div className="rounded-md border p-4 text-center">
+                    </div>
+                    <div className="rounded-md border p-4 text-center">
                       <p className="text-2xl font-bold text-yellow-600">{pendingBookings.length}</p>
                       <p className="text-sm text-muted-foreground">Pending</p>
-                  </div>
-                  <div className="rounded-md border p-4 text-center">
+                    </div>
+                    <div className="rounded-md border p-4 text-center">
                       <p className="text-2xl font-bold text-green-600">{approvedBookings.length}</p>
                       <p className="text-sm text-muted-foreground">Approved</p>
-                  </div>
-              </CardContent>
-          </Card>
-        )}
+                    </div>
+                  </CardContent>
+                </Card>
 
-        { (userBookings.length > 0) && !showBookingForm && !bookingResult && !error && !isLoading && !bookingsLoading && (
-             <div className="space-y-6">
+                {/* Lists of Bookings */}
                 {pendingBookings.length > 0 && (
                     <Card>
                         <CardHeader>
@@ -312,9 +315,30 @@ export default function Home() {
                         </CardContent>
                     </Card>
                 )}
-            </div>
+              </>
+            ) : (
+              // No bookings yet message
+              <Card> 
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Info className="h-6 w-6 text-primary" />
+                    No Booking History
+                  </CardTitle>
+                  <CardDescription>
+                    You haven't made any hall booking requests yet.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-muted-foreground">
+                    Click the "{userBookings.length === 0 ? "Make Your First Booking Request" : "Make a New Booking Request"}" button below to get started!
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
         )}
         
+        {/* "Make New Booking" / "Cancel Booking" Button */}
         {!bookingResult && !error && !isLoading && (
             <div className="text-center mt-6">
                  <Button 
@@ -329,12 +353,15 @@ export default function Home() {
                     {showBookingForm ? (
                         <> <XSquare className="mr-2 h-4 w-4" /> Cancel New Booking</>
                     ) : (
-                        <> <PlusCircle className="mr-2 h-4 w-4" /> Make a New Booking Request </>
+                        <> <PlusCircle className="mr-2 h-4 w-4" /> 
+                         {userBookings.length === 0 ? "Make Your First Booking Request" : "Make a New Booking Request"}
+                        </>
                     )}
                 </Button>
             </div>
         )}
 
+        {/* Booking Form */}
         {showBookingForm && !bookingResult && !error && !isLoading && ( 
           <Card className="mt-6">
             <CardHeader>
