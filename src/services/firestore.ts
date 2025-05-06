@@ -1,10 +1,9 @@
-
 'use server';
 /**
  * @fileOverview Firestore service functions for managing booking and user profile data.
  */
 import { db } from '@/lib/firebase';
-import { collection, addDoc, query, where, getDocs, updateDoc, doc, getDoc, setDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, updateDoc, doc, getDoc, setDoc, serverTimestamp, Timestamp, orderBy } from 'firebase/firestore';
 import type { BookingFormData } from '@/components/booking-form'; // Assuming BookingFormData includes necessary fields
 
 export interface BookingRequest extends BookingFormData {
@@ -15,6 +14,8 @@ export interface BookingRequest extends BookingFormData {
   approvedAt?: Timestamp;
   rejectedAt?: Timestamp;
   userId?: string; // Link booking to the user who created it
+  rejectionReason?: string; // Reason for rejection, if any
+  aiReason?: string; // Reason from AI if approval was required
 }
 
 export interface UserProfileData {
@@ -52,9 +53,10 @@ export async function saveUserProfile(userId: string, profileData: UserProfileDa
  * @param bookingDetails - The details of the booking.
  * @param token - The unique authorization token.
  * @param userId - The ID of the user making the booking.
+ * @param aiReason - The reason from AI if director approval is needed.
  * @returns The ID of the newly created Firestore document.
  */
-export async function savePendingBooking(bookingDetails: BookingFormData, token: string, userId?: string): Promise<string> {
+export async function savePendingBooking(bookingDetails: BookingFormData, token: string, userId?: string, aiReason?: string): Promise<string> {
   try {
     const docRef = await addDoc(collection(db, PENDING_BOOKINGS_COLLECTION), {
       ...bookingDetails,
@@ -63,6 +65,7 @@ export async function savePendingBooking(bookingDetails: BookingFormData, token:
       status: 'pending',
       token: token,
       createdAt: serverTimestamp(),
+      aiReason: aiReason || null,
     });
     console.log("Pending booking saved with ID: ", docRef.id);
     return docRef.id;
@@ -94,16 +97,17 @@ export async function getBookingByToken(token: string): Promise<BookingRequest |
     // Convert Firestore Timestamp back to Date object if needed by frontend
     const bookingData: BookingRequest = {
       id: docSnap.id,
-      studentId: data.studentId, // Keep studentId from form for now
+      studentId: data.studentId,
       hallPreference: data.hallPreference,
       dates: (data.dates as Timestamp).toDate(), // Convert Timestamp to Date
       status: data.status,
       token: data.token,
       createdAt: data.createdAt,
       userId: data.userId, // Include userId
-       // Add optional fields if they exist
       approvedAt: data.approvedAt,
       rejectedAt: data.rejectedAt,
+      rejectionReason: data.rejectionReason,
+      aiReason: data.aiReason,
     };
      console.log("Booking found for token:", token, bookingData);
     return bookingData;
@@ -117,20 +121,23 @@ export async function getBookingByToken(token: string): Promise<BookingRequest |
  * Updates the status of a booking request by its Firestore document ID.
  * @param bookingId - The Firestore document ID of the booking.
  * @param newStatus - The new status ('approved' or 'rejected').
+ * @param rejectionReason - Optional reason if status is 'rejected'.
  */
-export async function updateBookingStatus(bookingId: string, newStatus: 'approved' | 'rejected'): Promise<void> {
+export async function updateBookingStatus(bookingId: string, newStatus: 'approved' | 'rejected', rejectionReason?: string): Promise<void> {
   try {
     const bookingRef = doc(db, PENDING_BOOKINGS_COLLECTION, bookingId);
-    const updateData: { status: 'approved' | 'rejected'; approvedAt?: Timestamp; rejectedAt?: Timestamp } = {
+    const updateData: Partial<BookingRequest> = { // Use Partial for update data
         status: newStatus,
     };
     if (newStatus === 'approved') {
-        updateData.approvedAt = serverTimestamp();
-    } else {
-        updateData.rejectedAt = serverTimestamp();
+        updateData.approvedAt = serverTimestamp() as Timestamp;
+        updateData.rejectionReason = undefined; // Clear rejection reason if any, explicitly
+    } else { // 'rejected'
+        updateData.rejectedAt = serverTimestamp() as Timestamp;
+        updateData.rejectionReason = rejectionReason || "No reason provided.";
     }
 
-    await updateDoc(bookingRef, updateData);
+    await updateDoc(bookingRef, updateData as any); // Using 'as any' due to complex type with serverTimestamp and undefined
     console.log(`Booking ${bookingId} status updated to ${newStatus}`);
   } catch (e) {
     console.error("Error updating booking status: ", e);
@@ -161,12 +168,13 @@ export async function getBookingById(bookingId: string): Promise<BookingRequest 
         hallPreference: data.hallPreference,
         dates: (data.dates as Timestamp).toDate(), // Convert Timestamp to Date
         status: data.status,
-        token: data.token, // Include token if needed elsewhere
+        token: data.token,
         createdAt: data.createdAt,
-        userId: data.userId, // Include userId
-         // Add optional fields if they exist
+        userId: data.userId,
         approvedAt: data.approvedAt,
         rejectedAt: data.rejectedAt,
+        rejectionReason: data.rejectionReason,
+        aiReason: data.aiReason,
       };
       console.log("Booking found for ID:", bookingId, bookingData);
       return bookingData;
@@ -192,12 +200,11 @@ export async function getUserProfile(userId: string): Promise<UserProfileData | 
         }
 
         const data = docSnap.data();
-        // Ensure correct type casting
         const userProfile: UserProfileData = {
             name: data.name,
             email: data.email,
             department: data.department,
-            createdAt: data.createdAt, // Include createdAt if stored
+            createdAt: data.createdAt,
         };
          console.log("User profile found for ID:", userId, userProfile);
         return userProfile;
@@ -207,3 +214,44 @@ export async function getUserProfile(userId: string): Promise<UserProfileData | 
         throw new Error("Failed to retrieve user profile.");
     }
 }
+
+/**
+ * Retrieves all booking requests for a specific user.
+ * @param userId - The ID of the user.
+ * @returns An array of booking requests.
+ */
+export async function getUserBookings(userId: string): Promise<BookingRequest[]> {
+  try {
+    const q = query(
+      collection(db, PENDING_BOOKINGS_COLLECTION),
+      where("userId", "==", userId),
+      orderBy("createdAt", "desc") // Order by creation date, newest first
+    );
+    const querySnapshot = await getDocs(q);
+
+    const bookings: BookingRequest[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      bookings.push({
+        id: docSnap.id,
+        studentId: data.studentId,
+        hallPreference: data.hallPreference,
+        dates: (data.dates as Timestamp).toDate(),
+        status: data.status,
+        token: data.token,
+        createdAt: data.createdAt,
+        userId: data.userId,
+        approvedAt: data.approvedAt,
+        rejectedAt: data.rejectedAt,
+        rejectionReason: data.rejectionReason,
+        aiReason: data.aiReason,
+      });
+    });
+    console.log(`Found ${bookings.length} bookings for user ID: ${userId}`);
+    return bookings;
+  } catch (e) {
+    console.error("Error getting user bookings: ", e);
+    throw new Error("Failed to retrieve user bookings.");
+  }
+}
+

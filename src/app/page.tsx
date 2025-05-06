@@ -1,4 +1,3 @@
-
 'use client';
 
 import * as React from 'react';
@@ -7,100 +6,130 @@ import type {BookingFormData} from '@/components/booking-form';
 import {BookingForm} from '@/components/booking-form';
 import {BookingConfirmation} from '@/components/booking-confirmation';
 import type {AuthorizeBookingOutput} from '@/ai/flows/authorize-booking';
-import { savePendingBooking, getUserProfile, type UserProfileData } from '@/services/firestore'; // Import Firestore service
-import { sendApprovalEmail } from '@/services/email'; // Import Email service
-import crypto from 'crypto'; // For generating token
-import { useAuth } from '@/context/AuthContext'; // Import useAuth hook
-import { Button } from '@/components/ui/button'; // Import Button
-import { LogIn, Loader2, User } from 'lucide-react'; // Import icons
+import { savePendingBooking, getUserProfile, type UserProfileData, getUserBookings, type BookingRequest } from '@/services/firestore';
+import { sendApprovalEmail } from '@/services/email'; 
+import crypto from 'crypto'; 
+import { useAuth } from '@/context/AuthContext'; 
+import { Button } from '@/components/ui/button'; 
+import { LogIn, Loader2, User, ListChecks, Hourglass, CheckSquare, XSquare, Info, PlusCircle } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { format } from 'date-fns';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
-// Extend BookingResult to include database ID and token
+
 interface BookingResult extends AuthorizeBookingOutput {
   formData: BookingFormData;
-  bookingId?: string; // Firestore document ID
-  token?: string; // Authorization token
+  bookingId?: string; 
+  token?: string; 
 }
 
 export default function Home() {
-  const { user, loading: authLoading } = useAuth(); // Get user and loading state from context
+  const { user, loading: authLoading } = useAuth(); 
+  const { toast } = useToast();
   const [bookingResult, setBookingResult] = React.useState<BookingResult | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [userProfile, setUserProfile] = React.useState<UserProfileData | null>(null);
   const [profileLoading, setProfileLoading] = React.useState(false);
+  const [userBookings, setUserBookings] = React.useState<BookingRequest[]>([]);
+  const [bookingsLoading, setBookingsLoading] = React.useState(false);
+  const [showBookingForm, setShowBookingForm] = React.useState(false);
 
 
-   // Fetch user profile when user is authenticated
    React.useEffect(() => {
-    async function fetchUserProfile() {
+    async function fetchUserData() {
       if (user) {
         setProfileLoading(true);
+        setBookingsLoading(true);
+        setShowBookingForm(false); // Reset form visibility
+        setBookingResult(null); // Clear previous booking result
+        setError(null); // Clear previous errors
         try {
           const profile = await getUserProfile(user.uid);
           setUserProfile(profile);
+          const bookings = await getUserBookings(user.uid);
+          setUserBookings(bookings);
         } catch (err) {
-          console.error("Failed to fetch user profile:", err);
-          setError("Could not load your profile information.");
+          console.error("Failed to fetch user data:", err);
+          setError("Could not load your profile or booking information.");
+          toast({
+            title: 'Error',
+            description: 'Could not load your profile or booking information.',
+            variant: 'destructive',
+          });
         } finally {
           setProfileLoading(false);
+          setBookingsLoading(false);
         }
       } else {
-        setUserProfile(null); // Clear profile if user logs out
+        // Clear all user-specific state on logout
+        setUserProfile(null); 
+        setUserBookings([]);
+        setShowBookingForm(false);
+        setBookingResult(null);
+        setError(null);
       }
     }
-    fetchUserProfile();
-  }, [user]);
+    fetchUserData();
+  }, [user, toast]);
 
 
-  // Function to handle the result from BookingForm
   const handleBookingSubmit = async (result: BookingResult | null, errorMsg?: string) => {
-    setError(errorMsg || null); // Set error first if any
+    setError(errorMsg || null); 
 
     if (result && !errorMsg) {
-      // Ensure user is logged in before proceeding
       if (!user) {
          setError("You must be logged in to make a booking.");
          setIsLoading(false);
          return;
       }
 
-      // If AI indicates director approval is needed
-      if (result.requiresDirectorApproval) {
-        setIsLoading(true); // Keep loading indicator on while saving/sending email
-        try {
-          // 1. Generate a unique token
-          const token = crypto.randomBytes(32).toString('hex');
+      setIsLoading(true);
+      try {
+        let bookingId: string | undefined;
+        let tokenValue: string | undefined; // Renamed to avoid conflict with booking.token
 
-          // 2. Save pending booking to Firestore, including the userId
-          const bookingId = await savePendingBooking(result.formData, token, user.uid);
+        // The AI's reason for requiring approval (or for auto-approval if implemented that way)
+        const aiReasonForDecision = result.reason;
 
-          // 3. Send email to director with the approval link
-          const directorEmail = process.env.NEXT_PUBLIC_DIRECTOR_EMAIL || 'director@example.com'; // Get director email from env
+        if (result.requiresDirectorApproval) {
+          tokenValue = crypto.randomBytes(32).toString('hex');
+          bookingId = await savePendingBooking(result.formData, tokenValue, user.uid, aiReasonForDecision);
+
+          const directorEmail = process.env.NEXT_PUBLIC_DIRECTOR_EMAIL || 'director@example.com'; 
           if (!directorEmail) {
              throw new Error("Director email is not configured.");
           }
-          await sendApprovalEmail(directorEmail, token, result.formData);
-
-           // Update state with bookingId and token for confirmation display
-          setBookingResult({ ...result, bookingId, token });
-          setError(null); // Clear any previous errors
-
-        } catch (dbError: any) {
-           console.error("Error during pending booking process:", dbError);
-           setError(`Failed to process booking requiring approval: ${dbError.message}`);
-           setBookingResult(null); // Clear booking result on error
-        } finally {
-          setIsLoading(false); // Stop loading indicator
+          await sendApprovalEmail(directorEmail, tokenValue, result.formData);
+        } else {
+          // For auto-approved, we still save it, potentially with 'approved' status and AI reason
+           tokenValue = crypto.randomBytes(32).toString('hex'); // Still generate a token for data structure consistency
+           // Saving as 'pending' for now, assuming AI auto-approval means it's pending system confirmation or just for record
+           bookingId = await savePendingBooking(result.formData, tokenValue, user.uid, aiReasonForDecision);
+           // If truly auto-approved, you might call updateBookingStatus here immediately to 'approved'
+           // e.g., await updateBookingStatus(bookingId, 'approved');
+           console.log("Booking auto-processed by AI:", result.formData, "Reason:", aiReasonForDecision);
         }
-      } else {
-        // If auto-approved by AI, just display the confirmation
-        // In a real app, you might still save this directly as an 'approved' booking
-         // Potentially save auto-approved booking here with user.uid if needed
-        setBookingResult(result);
-        setIsLoading(false);
+        
+        setBookingResult({ ...result, bookingId, token: tokenValue });
+        
+        if (user) { // Refresh bookings list
+            const updatedBookings = await getUserBookings(user.uid);
+            setUserBookings(updatedBookings);
+        }
+        setShowBookingForm(false); 
+        setError(null); 
+
+      } catch (dbError: any) {
+         console.error("Error during booking process:", dbError);
+         setError(`Failed to process booking: ${dbError.message}`);
+         setBookingResult(null); 
+      } finally {
+        setIsLoading(false); 
       }
     } else {
-      // Handle cases where the form itself failed or AI errored
       setBookingResult(null);
       setIsLoading(false);
     }
@@ -109,26 +138,29 @@ export default function Home() {
 
   const handleLoadingChange = (loading: boolean) => {
     setIsLoading(loading);
-    // Reset state when starting a new submission
     if (loading) {
       setBookingResult(null);
       setError(null);
     }
   };
 
-  // Render loading state while checking authentication
-   if (authLoading || (user && profileLoading)) {
+  const pendingBookings = userBookings.filter(b => b.status === 'pending');
+  const approvedBookings = userBookings.filter(b => b.status === 'approved');
+  const rejectedBookings = userBookings.filter(b => b.status === 'rejected');
+
+   if (authLoading || (user && (profileLoading || bookingsLoading))) {
     return (
        <main className="container mx-auto flex min-h-screen flex-col items-center justify-center p-4 md:p-8">
         <div className="flex flex-col items-center space-y-2">
           <Loader2 className="h-12 w-12 animate-spin text-primary" />
-           <p className="text-lg text-muted-foreground">{authLoading ? 'Checking authentication...' : 'Loading profile...'}</p>
+           <p className="text-lg text-muted-foreground">
+             {authLoading ? 'Checking authentication...' : (profileLoading ? 'Loading profile...' : 'Loading bookings...')}
+           </p>
         </div>
        </main>
     );
   }
 
-  // Render login prompt if user is not authenticated
   if (!user) {
     return (
        <main className="container mx-auto flex min-h-screen flex-col items-center justify-center p-4 md:p-8">
@@ -152,85 +184,210 @@ export default function Home() {
     );
   }
 
-  // Render main booking page if user is authenticated
   return (
-    <main className="container mx-auto flex min-h-screen flex-col items-center justify-center p-4 md:p-8">
-      <div className="w-full max-w-2xl space-y-8">
-         {/* Optional: Display welcome message */}
-        {userProfile && (
-            <p className="text-center text-lg text-muted-foreground">
-              Welcome, {userProfile.name}! ({userProfile.department})
-            </p>
-        )}
-        <h1 className="text-center text-4xl font-bold text-primary">HallPass</h1>
-        <p className="text-center text-muted-foreground">
-          Register for your college hall booking.
-        </p>
-
-        {!bookingResult && !error && !isLoading && ( // Only show form initially
-          <BookingForm
-            onSubmitSuccess={handleBookingSubmit}
-            onLoadingChange={handleLoadingChange}
-            isLoading={isLoading} // Pass loading state down
-            // Pass user profile data to prefill if needed (e.g., student ID)
-            defaultStudentId={userProfile?.email} // Example: Prefill student ID with email
-          />
-        )}
-
-         {isLoading && (
-          <div className="flex flex-col items-center justify-center rounded-md border bg-card p-6 text-center shadow-sm">
-             <svg className="mr-3 h-8 w-8 animate-spin text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-             </svg>
-            <p className="mt-2 text-lg font-semibold text-foreground">Processing Request...</p>
-             <p className="text-muted-foreground">
-                {bookingResult?.requiresDirectorApproval ? "Saving request and notifying director..." : "Analyzing request..."}
-            </p>
-          </div>
-        )}
-
-
-        {bookingResult && !isLoading && ( // Show confirmation only when not loading
-          <BookingConfirmation
-            bookingDetails={bookingResult.formData}
-            authorization={bookingResult}
-            bookingId={bookingResult.bookingId} // Pass bookingId if available
-          />
-        )}
-
-        {error && !isLoading && ( // Show error only when not loading
-          <div className="rounded-md border border-destructive bg-destructive/10 p-4 text-center text-destructive">
-            <p className="font-semibold">Error:</p>
-            <p>{error}</p>
-          </div>
-        )}
-
-        {(bookingResult || error) && !isLoading && ( // Show reset button after confirmation or error
-           <button
-            onClick={() => {
-              setBookingResult(null);
-              setError(null);
-            }}
-            className="mt-4 w-full rounded-md bg-secondary px-4 py-2 text-secondary-foreground shadow-sm transition-colors hover:bg-secondary/80 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-           >
-            Make Another Booking
-          </button>
-        )}
-      </div>
-       {/* Add Logout Button */}
-        <Button
+    <main className="container mx-auto flex min-h-screen flex-col items-center p-4 pt-20 md:p-8 md:pt-24">
+      <Button
           variant="outline"
           onClick={async () => {
             await auth.signOut();
-            // Optionally redirect to login or show logged out message
-             toast({ title: 'Logged Out', description: 'You have been successfully logged out.' });
-             // router.push('/login'); // Optional redirect
+            // No need to manually clear state here, useEffect dependency on 'user' handles it.
+            toast({ title: 'Logged Out', description: 'You have been successfully logged out.' });
           }}
           className="absolute right-4 top-4"
         >
           Logout
         </Button>
+
+      <div className="w-full max-w-3xl space-y-8">
+        {userProfile && (
+            <div className="text-center">
+                <h1 className="text-3xl font-bold text-primary">Welcome, {userProfile.name}!</h1>
+                <p className="text-muted-foreground">{userProfile.department}</p>
+            </div>
+        )}
+
+        {/* Booking Summary Card - always show if user is logged in and not in a form/result state */}
+        {!showBookingForm && !bookingResult && !error && !isLoading && (
+          <Card>
+              <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                      <ListChecks className="h-6 w-6 text-primary" />
+                      Your Booking Summary
+                  </CardTitle>
+              </CardHeader>
+              <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <div className="rounded-md border p-4 text-center">
+                      <p className="text-2xl font-bold">{userBookings.length}</p>
+                      <p className="text-sm text-muted-foreground">Total Bookings</p>
+                  </div>
+                  <div className="rounded-md border p-4 text-center">
+                      <p className="text-2xl font-bold text-yellow-600">{pendingBookings.length}</p>
+                      <p className="text-sm text-muted-foreground">Pending</p>
+                  </div>
+                  <div className="rounded-md border p-4 text-center">
+                      <p className="text-2xl font-bold text-green-600">{approvedBookings.length}</p>
+                      <p className="text-sm text-muted-foreground">Approved</p>
+                  </div>
+              </CardContent>
+          </Card>
+        )}
+
+        {/* Booking History Sections - show if not in form/result state */}
+        { (userBookings.length > 0) && !showBookingForm && !bookingResult && !error && !isLoading && (
+             <div className="space-y-6">
+                {pendingBookings.length > 0 && (
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2 text-xl">
+                                <Hourglass className="h-5 w-5 text-yellow-600" /> Pending Requests
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                            {pendingBookings.map(booking => (
+                                <div key={booking.id} className="rounded-md border p-3">
+                                    <p><strong>Hall:</strong> {booking.hallPreference}</p>
+                                    <p><strong>Date:</strong> {format(booking.dates, 'PPP')}</p>
+                                    <p><strong>Submitted:</strong> {format(booking.createdAt.toDate(), 'Pp')}</p>
+                                    {booking.aiReason && (
+                                      <Alert variant="default" className="mt-2 bg-blue-50 border-blue-300">
+                                        <Info className="h-4 w-4 text-blue-600" />
+                                        <AlertTitle className="text-blue-700">AI Note</AlertTitle>
+                                        <AlertDescription className="text-blue-600">
+                                          {booking.aiReason}
+                                        </AlertDescription>
+                                      </Alert>
+                                    )}
+                                </div>
+                            ))}
+                        </CardContent>
+                    </Card>
+                )}
+                {approvedBookings.length > 0 && (
+                     <Card>
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2 text-xl">
+                                <CheckSquare className="h-5 w-5 text-green-600" /> Approved Bookings
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                            {approvedBookings.map(booking => (
+                                <div key={booking.id} className="rounded-md border p-3">
+                                    <p><strong>Hall:</strong> {booking.hallPreference}</p>
+                                    <p><strong>Date:</strong> {format(booking.dates, 'PPP')}</p>
+                                    {booking.approvedAt && <p><strong>Approved:</strong> {format(booking.approvedAt.toDate(), 'Pp')}</p>}
+                                </div>
+                            ))}
+                        </CardContent>
+                    </Card>
+                )}
+                 {rejectedBookings.length > 0 && (
+                     <Card>
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2 text-xl">
+                                <XSquare className="h-5 w-5 text-destructive" /> Rejected/Cancelled Bookings
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                            {rejectedBookings.map(booking => (
+                                <div key={booking.id} className="rounded-md border p-3">
+                                    <p><strong>Hall:</strong> {booking.hallPreference}</p>
+                                    <p><strong>Date:</strong> {format(booking.dates, 'PPP')}</p>
+                                    {booking.rejectedAt && <p><strong>Processed:</strong> {format(booking.rejectedAt.toDate(), 'Pp')}</p>}
+                                    {booking.rejectionReason && <p><strong>Reason:</strong> {booking.rejectionReason}</p>}
+                                </div>
+                            ))}
+                        </CardContent>
+                    </Card>
+                )}
+            </div>
+        )}
+        
+        {/* New Booking Section Toggler - show if not in result/error/loading state */}
+        {!bookingResult && !error && !isLoading && (
+            <div className="text-center mt-6">
+                 <Button 
+                    onClick={() => {
+                        setShowBookingForm(prev => !prev);
+                        setBookingResult(null); // Clear any previous results
+                        setError(null); // Clear errors when toggling form
+                    }}
+                    variant={showBookingForm ? "outline" : "default"}
+                    className="w-full sm:w-auto"
+                  >
+                    {showBookingForm ? (
+                        <> <XSquare className="mr-2 h-4 w-4" /> Cancel New Booking</>
+                    ) : (
+                        <> <PlusCircle className="mr-2 h-4 w-4" /> Make a New Booking Request </>
+                    )}
+                </Button>
+            </div>
+        )}
+
+        {/* Booking Form */}
+        {showBookingForm && !bookingResult && !error && !isLoading && ( 
+          <Card className="mt-6">
+            <CardHeader>
+                <CardTitle>New Hall Booking Request</CardTitle>
+                <CardDescription>Fill in the details below to book a hall.</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <BookingForm
+                    onSubmitSuccess={handleBookingSubmit}
+                    onLoadingChange={handleLoadingChange}
+                    isLoading={isLoading} 
+                    defaultStudentId={userProfile?.email || user?.email || ''}
+                />
+            </CardContent>
+          </Card>
+        )}
+
+         {isLoading && ( // Show loading spinner during AI processing or saving
+          <div className="flex flex-col items-center justify-center rounded-md border bg-card p-6 text-center shadow-sm mt-6">
+             <Loader2 className="mr-3 h-8 w-8 animate-spin text-primary" />
+            <p className="mt-2 text-lg font-semibold text-foreground">Processing Request...</p>
+             <p className="text-muted-foreground">
+                Please wait while we process your booking.
+            </p>
+          </div>
+        )}
+
+
+        {bookingResult && !isLoading && ( // Show confirmation
+          <div className="mt-6">
+            <BookingConfirmation
+                bookingDetails={bookingResult.formData}
+                authorization={bookingResult}
+                bookingId={bookingResult.bookingId} 
+            />
+          </div>
+        )}
+
+        {error && !isLoading && ( // Show error message
+          <Alert variant="destructive" className="mt-6">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {/* Button to go back to summary/clear form/result */}
+        {(bookingResult || error || showBookingForm) && !isLoading && ( 
+           <div className="text-center mt-6">
+            <Button
+                onClick={() => {
+                setBookingResult(null);
+                setError(null);
+                setShowBookingForm(false); 
+                }}
+                variant="outline"
+                className="w-full sm:w-auto"
+            >
+                {showBookingForm && !bookingResult && !error ? 'Back to Summary' : 'View Booking Summary / Make Another'}
+            </Button>
+           </div>
+        )}
+      </div>
     </main>
   );
 }
+
