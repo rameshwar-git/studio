@@ -1,0 +1,16 @@
+// Original
+// const get
+// StatusBadge = () => { ... }
+
+// Fixed
+const getStatusBadge = () => { ... }
+
+               {getStatusBadge()}
+            
+            
+          
+        
+      
+    
+  );
+}

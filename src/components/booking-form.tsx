@@ -1,3 +1,4 @@
+
 'use client';
 
 import * as React from 'react';
@@ -56,19 +57,19 @@ const bookingFormSchema = z.object({
 export type BookingFormData = z.infer<typeof bookingFormSchema>;
 
 interface BookingFormProps {
-  onSubmitSuccess: (result: (AuthorizeBookingOutput &amp; { formData: BookingFormData }) | null, error?: string) =&gt; void;
-  onLoadingChange: (isLoading: boolean) =&gt; void;
+  onSubmitSuccess: (result: (AuthorizeBookingOutput & { formData: BookingFormData }) | null, error?: string) => void;
+  onLoadingChange: (isLoading: boolean) => void;
   isLoading: boolean;
   userProfile: UserProfileData | null;
 }
 
 // Helper to generate time slots
-const generateTimeSlots = () =&gt; {
+const generateTimeSlots = () => {
     const slots = [];
     const Tslots = [];
     const startHour = 9;
     const endHour = 17; // 5 PM
-    for (let hour = startHour; hour &lt; endHour; hour++) {
+    for (let hour = startHour; hour < endHour; hour++) {
         slots.push(`${String(hour).padStart(2, '0')}:00`);
         slots.push(`${String(hour).padStart(2, '0')}:30`);
     }
@@ -76,9 +77,9 @@ const generateTimeSlots = () =&gt; {
 
     // For end time, we need slots up to 5 PM. For start time, up to 4:30 PM.
     // Assuming 1 hour booking slot minimum
-    for (let hour = startHour; hour &lt;= endHour; hour++) {
+    for (let hour = startHour; hour <= endHour; hour++) {
         Tslots.push(`${String(hour).padStart(2, '0')}:00`);
-        if (hour &lt; endHour) { // Don't add 5:30 PM for example
+        if (hour < endHour) { // Don't add 5:30 PM for example
           Tslots.push(`${String(hour).padStart(2, '0')}:30`);
         }
     }
@@ -91,7 +92,7 @@ const { startSlots, endSlots } = generateTimeSlots();
 export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userProfile }: BookingFormProps) {
   const {toast} = useToast();
 
-  const form = useForm&lt;BookingFormData&gt;({
+  const form = useForm<BookingFormData>({
     resolver: zodResolver(bookingFormSchema),
     defaultValues: {
       studentName: userProfile?.name || '',
@@ -103,7 +104,7 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
     },
   });
 
-   React.useEffect(() =&gt; {
+   React.useEffect(() => {
      form.reset({
        studentName: userProfile?.name || '',
        studentEmail: userProfile?.email || '',
@@ -114,7 +115,7 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
      });
    }, [userProfile, form]);
 
-   const checkAvailability = async (hall: string, date: Date, startTime: string, endTime: string): Promise&lt;boolean&gt; =&gt; {
+   const checkAvailability = async (hall: string, date: Date, startTime: string, endTime: string): Promise<boolean> => {
         const selectedDateStart = startOfDay(date);
         const [startH, startM] = startTime.split(':').map(Number);
         const [endH, endM] = endTime.split(':').map(Number);
@@ -136,10 +137,10 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
             const existingRangeEnd = addHours(existingEnd, 1);
 
             // Check for overlap:
-            // (StartA &lt; EndB) and (EndA &gt; StartB)
-            if (isBefore(newBookingStart, existingRangeEnd) &amp;&amp; isBefore(existingRangeStart, newBookingEnd)) {
+            // (StartA < EndB) and (EndA > StartB)
+            if (isBefore(newBookingStart, existingRangeEnd) && isBefore(existingRangeStart, newBookingEnd)) {
                  // More precise check: If new start is within 1 hour of existing end OR new end is within 1 hour of existing start
-                if (isBefore(newBookingStart, addHours(existingEnd,1)) &amp;&amp; isBefore(addHours(existingStart, -1), newBookingEnd)) {
+                if (isBefore(newBookingStart, addHours(existingEnd,1)) && isBefore(addHours(existingStart, -1), newBookingEnd)) {
                     return false; // Conflict
                 }
             }
@@ -194,167 +195,167 @@ export function BookingForm({ onSubmitSuccess, onLoadingChange, isLoading, userP
       onLoadingChange(false);
     }
   }
-  const [error, setError] = React.useState&lt;string | null&gt;(null);
+  const [error, setError] = React.useState<string | null>(null);
 
 
   return (
-    &lt;Form {...form}&gt;
-      &lt;form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 rounded-lg border bg-card p-6 shadow-sm"&gt;
-        &lt;div className="grid grid-cols-1 gap-4 md:grid-cols-2"&gt;
-            &lt;FormField
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 rounded-lg border bg-card p-6 shadow-sm">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <FormField
             control={form.control}
             name="studentName"
-            render={({field}) =&gt; (
-                &lt;FormItem&gt;
-                &lt;FormLabel className="flex items-center gap-2"&gt;
-                    &lt;User className="h-4 w-4 text-muted-foreground" /&gt; Student Name
-                &lt;/FormLabel&gt;
-                &lt;FormControl&gt;
-                    &lt;Input placeholder="Your full name" {...field} readOnly={!!userProfile?.name} /&gt;
-                &lt;/FormControl&gt;
-                &lt;FormMessage /&gt;
-                &lt;/FormItem&gt;
+            render={({field}) => (
+                <FormItem>
+                <FormLabel className="flex items-center gap-2">
+                    <User className="h-4 w-4 text-muted-foreground" /> Student Name
+                </FormLabel>
+                <FormControl>
+                    <Input placeholder="Your full name" {...field} readOnly={!!userProfile?.name} />
+                </FormControl>
+                <FormMessage />
+                </FormItem>
             )}
-            /&gt;
-            &lt;FormField
+            />
+            <FormField
             control={form.control}
             name="studentEmail"
-            render={({field}) =&gt; (
-                &lt;FormItem&gt;
-                &lt;FormLabel className="flex items-center gap-2"&gt;
-                    &lt;Mail className="h-4 w-4 text-muted-foreground" /&gt; Student Email
-                &lt;/FormLabel&gt;
-                &lt;FormControl&gt;
-                    &lt;Input type="email" placeholder="your.email@university.edu" {...field} readOnly={!!userProfile?.email} /&gt;
-                &lt;/FormControl&gt;
-                &lt;FormMessage /&gt;
-                &lt;/FormItem&gt;
+            render={({field}) => (
+                <FormItem>
+                <FormLabel className="flex items-center gap-2">
+                    <Mail className="h-4 w-4 text-muted-foreground" /> Student Email
+                </FormLabel>
+                <FormControl>
+                    <Input type="email" placeholder="your.email@university.edu" {...field} readOnly={!!userProfile?.email} />
+                </FormControl>
+                <FormMessage />
+                </FormItem>
             )}
-            /&gt;
-        &lt;/div&gt;
-        &lt;FormField
+            />
+        </div>
+        <FormField
           control={form.control}
           name="hallPreference"
-          render={({field}) =&gt; (
-            &lt;FormItem&gt;
-              &lt;FormLabel className="flex items-center gap-2"&gt;
-                &lt;Building className="h-4 w-4 text-muted-foreground" /&gt; Hall Preference
-              &lt;/FormLabel&gt;
-              &lt;FormControl&gt;
-                &lt;Input placeholder="e.g., Main Hall, Seminar Room A" {...field} /&gt;
-              &lt;/FormControl&gt;
-              &lt;FormDescription&gt;Specify the hall you wish to book.&lt;/FormDescription&gt;
-              &lt;FormMessage /&gt;
-            &lt;/FormItem&gt;
+          render={({field}) => (
+            <FormItem>
+              <FormLabel className="flex items-center gap-2">
+                <Building className="h-4 w-4 text-muted-foreground" /> Hall Preference
+              </FormLabel>
+              <FormControl>
+                <Input placeholder="e.g., Main Hall, Seminar Room A" {...field} />
+              </FormControl>
+              <FormDescription>Specify the hall you wish to book.</FormDescription>
+              <FormMessage />
+            </FormItem>
           )}
-        /&gt;
-        &lt;FormField
+        />
+        <FormField
           control={form.control}
           name="date"
-          render={({field}) =&gt; (
-            &lt;FormItem className="flex flex-col"&gt;
-              &lt;FormLabel className="flex items-center gap-2"&gt;
-                &lt;CalendarDays className="h-4 w-4 text-muted-foreground" /&gt; Booking Date
-              &lt;/FormLabel&gt;
-              &lt;Popover&gt;
-                &lt;PopoverTrigger asChild&gt;
-                  &lt;FormControl&gt;
-                    &lt;Button
+          render={({field}) => (
+            <FormItem className="flex flex-col">
+              <FormLabel className="flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-muted-foreground" /> Booking Date
+              </FormLabel>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <FormControl>
+                    <Button
                       variant={'outline'}
                       className={cn(
                         'w-full pl-3 text-left font-normal',
-                        !field.value &amp;&amp; 'text-muted-foreground'
+                        !field.value && 'text-muted-foreground'
                       )}
-                    &gt;
-                      {field.value ? format(field.value, 'PPP') : &lt;span&gt;Pick a date&lt;/span&gt;}
-                      &lt;CalendarIcon className="ml-auto h-4 w-4 opacity-50" /&gt;
-                    &lt;/Button&gt;
-                  &lt;/FormControl&gt;
-                &lt;/PopoverTrigger&gt;
-                &lt;PopoverContent className="w-auto p-0" align="start"&gt;
-                  &lt;Calendar
+                    >
+                      {field.value ? format(field.value, 'PPP') : <span>Pick a date</span>}
+                      <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                    </Button>
+                  </FormControl>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
                     mode="single"
                     selected={field.value}
                     onSelect={field.onChange}
-                    disabled={(date) =&gt; date &lt; startOfDay(new Date())} // Disable past dates
+                    disabled={(date) => date < startOfDay(new Date())} // Disable past dates
                     initialFocus
-                  /&gt;
-                &lt;/PopoverContent&gt;
-              &lt;/Popover&gt;
-              &lt;FormDescription&gt;Select the date for your booking.&lt;/FormDescription&gt;
-              &lt;FormMessage /&gt;
-            &lt;/FormItem&gt;
+                  />
+                </PopoverContent>
+              </Popover>
+              <FormDescription>Select the date for your booking.</FormDescription>
+              <FormMessage />
+            </FormItem>
           )}
-        /&gt;
-        &lt;div className="grid grid-cols-1 gap-4 md:grid-cols-2"&gt;
-            &lt;FormField
+        />
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <FormField
                 control={form.control}
                 name="startTime"
-                render={({ field }) =&gt; (
-                &lt;FormItem&gt;
-                    &lt;FormLabel className="flex items-center gap-2"&gt;&lt;Clock className="h-4 w-4 text-muted-foreground" /&gt; Start Time&lt;/FormLabel&gt;
-                    &lt;Select onValueChange={field.onChange} defaultValue={field.value}&gt;
-                    &lt;FormControl&gt;
-                        &lt;SelectTrigger&gt;
-                        &lt;SelectValue placeholder="Select start time" /&gt;
-                        &lt;/SelectTrigger&gt;
-                    &lt;/FormControl&gt;
-                    &lt;SelectContent&gt;
-                        {startSlots.map(time =&gt; (
-                        &lt;SelectItem key={`start-${time}`} value={time}&gt;{format(setMinutes(setHours(new Date(), parseInt(time.split(':')[0])), parseInt(time.split(':')[1])), 'p')}&lt;/SelectItem&gt;
+                render={({ field }) => (
+                <FormItem>
+                    <FormLabel className="flex items-center gap-2"><Clock className="h-4 w-4 text-muted-foreground" /> Start Time</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormControl>
+                        <SelectTrigger>
+                        <SelectValue placeholder="Select start time" />
+                        </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                        {startSlots.map(time => (
+                        <SelectItem key={`start-${time}`} value={time}>{format(setMinutes(setHours(new Date(), parseInt(time.split(':')[0])), parseInt(time.split(':')[1])), 'p')}</SelectItem>
                         ))}
-                    &lt;/SelectContent&gt;
-                    &lt;/Select&gt;
-                    &lt;FormMessage /&gt;
-                &lt;/FormItem&gt;
+                    </SelectContent>
+                    </Select>
+                    <FormMessage />
+                </FormItem>
                 )}
-            /&gt;
-            &lt;FormField
+            />
+            <FormField
                 control={form.control}
                 name="endTime"
-                render={({ field }) =&gt; (
-                &lt;FormItem&gt;
-                    &lt;FormLabel className="flex items-center gap-2"&gt;&lt;Clock className="h-4 w-4 text-muted-foreground" /&gt; End Time&lt;/FormLabel&gt;
-                    &lt;Select onValueChange={field.onChange} defaultValue={field.value}
+                render={({ field }) => (
+                <FormItem>
+                    <FormLabel className="flex items-center gap-2"><Clock className="h-4 w-4 text-muted-foreground" /> End Time</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}
                         disabled={!form.watch('startTime')} // Disable if start time not selected
-                    &gt;
-                    &lt;FormControl&gt;
-                        &lt;SelectTrigger&gt;
-                        &lt;SelectValue placeholder="Select end time" /&gt;
-                        &lt;/SelectTrigger&gt;
-                    &lt;/FormControl&gt;
-                    &lt;SelectContent&gt;
+                    >
+                    <FormControl>
+                        <SelectTrigger>
+                        <SelectValue placeholder="Select end time" />
+                        </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
                         {endSlots
-                        .filter(time =&gt; {
+                        .filter(time => {
                             const selectedStartTime = form.watch('startTime');
                             if (!selectedStartTime) return true; // Show all if start time not selected
                             const [startH, startM] = selectedStartTime.split(':').map(Number);
                             const [currentEndH, currentEndM] = time.split(':').map(Number);
                             // End time must be at least 30 mins after start time
-                            return currentEndH &gt; startH || (currentEndH === startH &amp;&amp; currentEndM &gt; startM);
+                            return currentEndH > startH || (currentEndH === startH && currentEndM > startM);
                         })
-                        .map(time =&gt; (
-                        &lt;SelectItem key={`end-${time}`} value={time}&gt;{format(setMinutes(setHours(new Date(), parseInt(time.split(':')[0])), parseInt(time.split(':')[1])), 'p')}&lt;/SelectItem&gt;
+                        .map(time => (
+                        <SelectItem key={`end-${time}`} value={time}>{format(setMinutes(setHours(new Date(), parseInt(time.split(':')[0])), parseInt(time.split(':')[1])), 'p')}</SelectItem>
                         ))}
-                    &lt;/SelectContent&gt;
-                    &lt;/Select&gt;
-                    &lt;FormDescription&gt;A 1-hour gap will be enforced around your booking.&lt;/FormDescription&gt;
-                    &lt;FormMessage /&gt;
-                &lt;/FormItem&gt;
+                    </SelectContent>
+                    </Select>
+                    <FormDescription>A 1-hour gap will be enforced around your booking.</FormDescription>
+                    <FormMessage />
+                </FormItem>
                 )}
-            /&gt;
-        &lt;/div&gt;
-         {error &amp;&amp; &lt;p className="text-sm font-medium text-destructive"&gt;{error}&lt;/p&gt;}
-        &lt;Button type="submit" disabled={isLoading} className="w-full bg-accent text-accent-foreground hover:bg-accent/90"&gt;
+            />
+        </div>
+         {error && <p className="text-sm font-medium text-destructive">{error}</p>}
+        <Button type="submit" disabled={isLoading} className="w-full bg-accent text-accent-foreground hover:bg-accent/90">
           {isLoading ? (
-            &lt;&gt;
-              &lt;Loader2 className="mr-2 h-4 w-4 animate-spin" /&gt; Submitting...
-            &lt;/&gt;
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Submitting...
+            </>
           ) : (
             'Submit Booking Request'
           )}
-        &lt;/Button&gt;
-      &lt;/form&gt;
-    &lt;/Form&gt;
+        </Button>
+      </form>
+    </Form>
   );
 }

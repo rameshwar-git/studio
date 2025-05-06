@@ -23,7 +23,7 @@ import {
 interface VenueCalendarProps {
   bookings: BookingRequest[];
   currentMonth: Date;
-  onMonthChange: (newMonth: Date) =&gt; void;
+  onMonthChange: (newMonth: Date) => void;
 }
 
 // Define standard operational hours and booking duration
@@ -33,9 +33,9 @@ const BOOKING_DURATION_HOURS = 1;
 const GAP_DURATION_HOURS = 1; // 1-hour gap
 
 // Generate all possible 1-hour start slots within operational hours
-const getAllPossibleSlots = () =&gt; {
+const getAllPossibleSlots = () => {
   const slots = [];
-  for (let hour = OPERATIONAL_START_HOUR; hour &lt; OPERATIONAL_END_HOUR; hour++) {
+  for (let hour = OPERATIONAL_START_HOUR; hour < OPERATIONAL_END_HOUR; hour++) {
     // Bookings are 1 hour, so a booking starting at hour X ends at X+1
     // Last possible start time is OPERATIONAL_END_HOUR - BOOKING_DURATION_HOURS
     slots.push({ start: hour, end: hour + BOOKING_DURATION_HOURS });
@@ -45,8 +45,8 @@ const getAllPossibleSlots = () =&gt; {
 const ALL_POSSIBLE_SLOTS = getAllPossibleSlots();
 
 // Get unique hall names from bookings (in a real app, this might come from a predefined list)
-const getUniqueHalls = (bookings: BookingRequest[]): string[] =&gt; {
-    const halls = new Set(bookings.map(b =&gt; b.hallPreference));
+const getUniqueHalls = (bookings: BookingRequest[]): string[] => {
+    const halls = new Set(bookings.map(b => b.hallPreference));
     // Add some default halls if none are in bookings, for demo purposes
     if (halls.size === 0) {
         return ["Main Hall", "Seminar Room A", "Conference Room B"];
@@ -56,33 +56,33 @@ const getUniqueHalls = (bookings: BookingRequest[]): string[] =&gt; {
 
 
 export function VenueCalendar({ bookings, currentMonth, onMonthChange }: VenueCalendarProps) {
-  const [dayStatus, setDayStatus] = React.useState&lt;Record&lt;string, 'available' | 'fully-booked'&gt;&gt;({});
+  const [dayStatus, setDayStatus] = React.useState<Record<string, 'available' | 'fully-booked'>>({});
 
-  React.useEffect(() =&gt; {
+  React.useEffect(() => {
     const monthStart = startOfMonth(currentMonth);
     const monthEnd = endOfMonth(currentMonth);
     const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });
-    const newDayStatus: Record&lt;string, 'available' | 'fully-booked'&gt; = {};
+    const newDayStatus: Record<string, 'available' | 'fully-booked'> = {};
     
     const ALL_HALLS = getUniqueHalls(bookings);
     if (ALL_HALLS.length === 0) { // If no halls, all days are 'available' (or undefined by default)
-        daysInMonth.forEach(day =&gt; {
+        daysInMonth.forEach(day => {
             newDayStatus[format(day, 'yyyy-MM-dd')] = 'available';
         });
         setDayStatus(newDayStatus);
         return;
     }
 
-    daysInMonth.forEach(day =&gt; {
+    daysInMonth.forEach(day => {
       let isDayFullyBookedForAllHalls = true;
 
       for (const hall of ALL_HALLS) {
         const bookingsForHallOnDay = bookings.filter(
-          b =&gt; isSameDay(b.startTimeDate || b.date, day) &amp;&amp; b.hallPreference === hall &amp;&amp; (b.status === 'approved' || b.status === 'pending'))
-        .map(b =&gt; {
+          b => isSameDay(b.startTimeDate || b.date, day) && b.hallPreference === hall && (b.status === 'approved' || b.status === 'pending'))
+        .map(b => {
             // Ensure startTimeDate and endTimeDate are actual Date objects
             let sd, ed;
-            if (b.startTimeDate &amp;&amp; b.endTimeDate) {
+            if (b.startTimeDate && b.endTimeDate) {
                 sd = b.startTimeDate;
                 ed = b.endTimeDate;
             } else { // Fallback if precise timestamps weren't stored/retrieved (should not happen with current firestore.ts)
@@ -106,8 +106,8 @@ export function VenueCalendar({ bookings, currentMonth, onMonthChange }: VenueCa
             const effectiveBookingEnd = addHours(booking.end, GAP_DURATION_HOURS);
 
             // Check if [slotStart, slotEnd) overlaps with [effectiveBookingStart, effectiveBookingEnd)
-            // Overlap if (slotStart &lt; effectiveBookingEnd) and (slotEnd &gt; effectiveBookingStart)
-            if (slotStart &lt; effectiveBookingEnd &amp;&amp; slotEnd &gt; effectiveBookingStart) {
+            // Overlap if (slotStart < effectiveBookingEnd) and (slotEnd > effectiveBookingStart)
+            if (slotStart < effectiveBookingEnd && slotEnd > effectiveBookingStart) {
               isSlotAvailable = false;
               break;
             }
@@ -129,8 +129,8 @@ export function VenueCalendar({ bookings, currentMonth, onMonthChange }: VenueCa
   }, [bookings, currentMonth]);
 
   const modifiers = {
-    available: (date: Date) =&gt; dayStatus[format(date, 'yyyy-MM-dd')] === 'available',
-    fullyBooked: (date: Date) =&gt; dayStatus[format(date, 'yyyy-MM-dd')] === 'fully-booked',
+    available: (date: Date) => dayStatus[format(date, 'yyyy-MM-dd')] === 'available',
+    fullyBooked: (date: Date) => dayStatus[format(date, 'yyyy-MM-dd')] === 'fully-booked',
   };
 
   const modifiersClassNames = {
@@ -139,44 +139,44 @@ export function VenueCalendar({ bookings, currentMonth, onMonthChange }: VenueCa
   };
 
   return (
-    &lt;div className="rounded-md border"&gt;
-      &lt;Calendar
+    <div className="rounded-md border">
+      <Calendar
         mode="single"
         month={currentMonth}
         onMonthChange={onMonthChange}
         modifiers={modifiers}
         modifiersClassNames={modifiersClassNames}
         components={{
-          Caption: ({ displayMonth }) =&gt; (
-            &lt;div className="flex items-center justify-between px-2 py-1"&gt;
-              &lt;h2 className="font-semibold text-lg"&gt;
+          Caption: ({ displayMonth }) => (
+            <div className="flex items-center justify-between px-2 py-1">
+              <h2 className="font-semibold text-lg">
                 {format(displayMonth, 'MMMM yyyy')}
-              &lt;/h2&gt;
-              &lt;div className="space-x-1"&gt;
-                &lt;Button
+              </h2>
+              <div className="space-x-1">
+                <Button
                   variant="outline"
                   size="icon"
                   className="h-7 w-7"
-                  onClick={() =&gt; onMonthChange(subMonths(currentMonth, 1))}
-                &gt;
-                  &lt;ChevronLeft className="h-4 w-4" /&gt;
-                  &lt;span className="sr-only"&gt;Previous month&lt;/span&gt;
-                &lt;/Button&gt;
-                &lt;Button
+                  onClick={() => onMonthChange(subMonths(currentMonth, 1))}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  <span className="sr-only">Previous month</span>
+                </Button>
+                <Button
                   variant="outline"
                   size="icon"
                   className="h-7 w-7"
-                  onClick={() =&gt; onMonthChange(addMonths(currentMonth, 1))}
-                &gt;
-                  &lt;ChevronRight className="h-4 w-4" /&gt;
-                  &lt;span className="sr-only"&gt;Next month&lt;/span&gt;
-                &lt;/Button&gt;
-              &lt;/div&gt;
-            &lt;/div&gt;
+                  onClick={() => onMonthChange(addMonths(currentMonth, 1))}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                  <span className="sr-only">Next month</span>
+                </Button>
+              </div>
+            </div>
           ),
         }}
         className="p-3"
-      /&gt;
-    &lt;/div&gt;
+      />
+    </div>
   );
 }
