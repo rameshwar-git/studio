@@ -8,7 +8,7 @@ import {BookingForm} from '@/components/booking-form';
 import {BookingConfirmation} from '@/components/booking-confirmation';
 import type {AuthorizeBookingOutput} from '@/ai/flows/authorize-booking';
 import { savePendingBooking, getUserProfile, type UserProfileData, getUserBookings, type BookingRequest } from '@/services/firestore';
-import { auth } from '@/lib/firebase'; // Corrected import for auth
+import { auth } from '@/lib/firebase';
 import { sendApprovalEmail } from '@/services/email'; 
 import crypto from 'crypto'; 
 import { useAuth } from '@/context/AuthContext'; 
@@ -45,17 +45,14 @@ export default function Home() {
       if (user) {
         setProfileLoading(true);
         setBookingsLoading(true);
-        setShowBookingForm(false); // Reset form visibility
-        setBookingResult(null); // Clear previous booking result
-        setError(null); // Clear previous errors
+        setShowBookingForm(false); 
+        setBookingResult(null); 
+        setError(null); 
         try {
-          const profile = await getUserProfile(user.uid);
+          const profile = await getUserProfile(user.uid); // getUserProfile now fetches from Realtime DB
           setUserProfile(profile);
-          // If profile is null, it means it wasn't found. This is not necessarily an error to throw,
-          // but the UI should handle it (e.g. prompt to create profile or show limited functionality).
-          // For now, we'll let it proceed and the UI can check if userProfile is null.
-
-          const bookings = await getUserBookings(user.uid);
+          
+          const bookings = await getUserBookings(user.uid); // Bookings are still from Firestore
           setUserBookings(bookings);
 
         } catch (err: any) {
@@ -77,7 +74,6 @@ export default function Home() {
           setBookingsLoading(false);
         }
       } else {
-        // Clear all user-specific state on logout
         setUserProfile(null); 
         setUserBookings([]);
         setShowBookingForm(false);
@@ -102,9 +98,8 @@ export default function Home() {
       setIsLoading(true);
       try {
         let bookingId: string | undefined;
-        let tokenValue: string | undefined; // Renamed to avoid conflict with booking.token
+        let tokenValue: string | undefined;
 
-        // The AI's reason for requiring approval (or for auto-approval if implemented that way)
         const aiReasonForDecision = result.reason;
 
         if (result.requiresDirectorApproval) {
@@ -117,18 +112,14 @@ export default function Home() {
           }
           await sendApprovalEmail(directorEmail, tokenValue, result.formData);
         } else {
-          // For auto-approved, we still save it, potentially with 'approved' status and AI reason
-           tokenValue = crypto.randomBytes(32).toString('hex'); // Still generate a token for data structure consistency
-           // Saving as 'pending' for now, assuming AI auto-approval means it's pending system confirmation or just for record
+           tokenValue = crypto.randomBytes(32).toString('hex'); 
            bookingId = await savePendingBooking(result.formData, tokenValue, user.uid, aiReasonForDecision);
-           // If truly auto-approved, you might call updateBookingStatus here immediately to 'approved'
-           // e.g., await updateBookingStatus(bookingId, 'approved');
            console.log("Booking auto-processed by AI:", result.formData, "Reason:", aiReasonForDecision);
         }
         
         setBookingResult({ ...result, bookingId, token: tokenValue });
         
-        if (user) { // Refresh bookings list
+        if (user) { 
             const updatedBookings = await getUserBookings(user.uid);
             setUserBookings(updatedBookings);
         }
@@ -161,7 +152,7 @@ export default function Home() {
   const approvedBookings = userBookings.filter(b => b.status === 'approved');
   const rejectedBookings = userBookings.filter(b => b.status === 'rejected');
 
-   if (authLoading || (user && (profileLoading || bookingsLoading) && !error)) { // Only show full page loader if no specific error
+   if (authLoading || (user && (profileLoading || bookingsLoading) && !error)) {
     return (
        <main className="container mx-auto flex min-h-screen flex-col items-center justify-center p-4 md:p-8">
         <div className="flex flex-col items-center space-y-2">
@@ -202,7 +193,7 @@ export default function Home() {
       <Button
           variant="outline"
           onClick={async () => {
-            if (auth) { // Ensure auth is available
+            if (auth) { 
               await auth.signOut();
               toast({ title: 'Logged Out', description: 'You have been successfully logged out.' });
             }
@@ -213,13 +204,13 @@ export default function Home() {
         </Button>
 
       <div className="w-full max-w-3xl space-y-8">
-        {userProfile && !profileLoading && ( // Only show if profile is loaded and exists
+        {userProfile && !profileLoading && (
             <div className="text-center">
                 <h1 className="text-3xl font-bold text-primary">Welcome, {userProfile.name}!</h1>
                 <p className="text-muted-foreground">{userProfile.department}</p>
             </div>
         )}
-        {!userProfile && !profileLoading && !error && ( // If profile not found, but no general error
+        {!userProfile && !profileLoading && !error && (
             <Alert variant="default" className="mt-4 bg-blue-50 border-blue-300">
                 <Info className="h-4 w-4 text-blue-600"/>
                 <AlertTitle className="text-blue-700">Profile Information</AlertTitle>
@@ -230,7 +221,6 @@ export default function Home() {
         )}
 
 
-        {/* Booking Summary Card - always show if user is logged in and not in a form/result state */}
         {!showBookingForm && !bookingResult && !error && !isLoading && !bookingsLoading && (
           <Card>
               <CardHeader>
@@ -256,7 +246,6 @@ export default function Home() {
           </Card>
         )}
 
-        {/* Booking History Sections - show if not in form/result state and bookings loaded */}
         { (userBookings.length > 0) && !showBookingForm && !bookingResult && !error && !isLoading && !bookingsLoading && (
              <div className="space-y-6">
                 {pendingBookings.length > 0 && (
@@ -326,14 +315,13 @@ export default function Home() {
             </div>
         )}
         
-        {/* New Booking Section Toggler - show if not in result/error/loading state */}
         {!bookingResult && !error && !isLoading && (
             <div className="text-center mt-6">
                  <Button 
                     onClick={() => {
                         setShowBookingForm(prev => !prev);
-                        setBookingResult(null); // Clear any previous results
-                        setError(null); // Clear errors when toggling form
+                        setBookingResult(null); 
+                        setError(null); 
                     }}
                     variant={showBookingForm ? "outline" : "default"}
                     className="w-full sm:w-auto"
@@ -347,7 +335,6 @@ export default function Home() {
             </div>
         )}
 
-        {/* Booking Form */}
         {showBookingForm && !bookingResult && !error && !isLoading && ( 
           <Card className="mt-6">
             <CardHeader>
@@ -365,7 +352,7 @@ export default function Home() {
           </Card>
         )}
 
-         {isLoading && ( // Show loading spinner during AI processing or saving
+         {isLoading && ( 
           <div className="flex flex-col items-center justify-center rounded-md border bg-card p-6 text-center shadow-sm mt-6">
              <Loader2 className="mr-3 h-8 w-8 animate-spin text-primary" />
             <p className="mt-2 text-lg font-semibold text-foreground">Processing Request...</p>
@@ -376,7 +363,7 @@ export default function Home() {
         )}
 
 
-        {bookingResult && !isLoading && ( // Show confirmation
+        {bookingResult && !isLoading && ( 
           <div className="mt-6">
             <BookingConfirmation
                 bookingDetails={bookingResult.formData}
@@ -386,7 +373,7 @@ export default function Home() {
           </div>
         )}
 
-        {error && !isLoading && ( // Show specific error message if set, general one otherwise
+        {error && !isLoading && ( 
           <Alert variant="destructive" className="mt-6">
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle>Error</AlertTitle>
@@ -394,7 +381,6 @@ export default function Home() {
           </Alert>
         )}
 
-        {/* Button to go back to summary/clear form/result */}
         {(bookingResult || error || showBookingForm) && !isLoading && ( 
            <div className="text-center mt-6">
             <Button

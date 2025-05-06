@@ -1,49 +1,52 @@
 
 'use server';
 /**
- * @fileOverview Firestore service functions for managing booking and user profile data.
+ * @fileOverview Firebase service functions for managing booking (Firestore) and user profile data (Realtime Database).
  */
-import { db } from '@/lib/firebase';
-import { collection, addDoc, query, where, getDocs, updateDoc, doc, getDoc, setDoc, serverTimestamp, Timestamp, orderBy } from 'firebase/firestore';
-import type { BookingFormData } from '@/components/booking-form'; // Assuming BookingFormData includes necessary fields
+import { db, realtimeDB } from '@/lib/firebase'; // Use db for Firestore, realtimeDB for Realtime DB
+import { collection, addDoc, query, where, getDocs, updateDoc, doc, getDoc, setDoc as setFirestoreDoc, serverTimestamp as firestoreServerTimestamp, Timestamp, orderBy } from 'firebase/firestore';
+import { ref, set as setRealtimeDB, get as getRealtimeDB, child, serverTimestamp as realtimeServerTimestamp } from "firebase/database";
+import type { BookingFormData } from '@/components/booking-form';
 
 export interface BookingRequest extends BookingFormData {
   id?: string; // Firestore document ID
   status: 'pending' | 'approved' | 'rejected';
   token: string;
-  createdAt: Timestamp;
+  createdAt: Timestamp; // Firestore Timestamp
   approvedAt?: Timestamp;
   rejectedAt?: Timestamp;
-  userId?: string; // Link booking to the user who created it
-  rejectionReason?: string; // Reason for rejection, if any
-  aiReason?: string; // Reason from AI if approval was required
+  userId?: string;
+  rejectionReason?: string;
+  aiReason?: string;
 }
 
 export interface UserProfileData {
     name: string;
     email: string;
     department: string;
-    createdAt?: Timestamp; // Optional: track when the profile was created
+    createdAt?: Timestamp | number; // Can be Firestore Timestamp or number from RTDB
 }
 
 const PENDING_BOOKINGS_COLLECTION = 'pendingBookings';
-const USERS_COLLECTION = 'users';
+// Realtime Database path for users
+const USERS_RTDB_PATH = 'users';
+
 
 /**
- * Saves user profile data to Firestore. Typically called after registration.
+ * Saves user profile data to Firebase Realtime Database.
  * @param userId - The Firebase Authentication user ID.
  * @param profileData - The user profile data to save.
  */
-export async function saveUserProfile(userId: string, profileData: UserProfileData): Promise<void> {
+export async function saveUserProfile(userId: string, profileData: Omit<UserProfileData, 'createdAt'>): Promise<void> {
   try {
-    const userDocRef = doc(db, USERS_COLLECTION, userId);
-    await setDoc(userDocRef, {
+    const userProfileRef = ref(realtimeDB, `${USERS_RTDB_PATH}/${userId}/profile`);
+    await setRealtimeDB(userProfileRef, {
         ...profileData,
-        createdAt: serverTimestamp(), // Add a timestamp for creation date
+        createdAt: realtimeServerTimestamp(), // Use Realtime Database serverTimestamp
     });
-    console.log("User profile saved for user ID: ", userId);
+    console.log("User profile saved to Realtime Database for user ID: ", userId);
   } catch (e: any) {
-    console.error("Error saving user profile: ", e);
+    console.error("Error saving user profile to Realtime Database: ", e);
     throw new Error(`Failed to save user profile: ${e.message || 'Unknown error'}`);
   }
 }
@@ -61,11 +64,11 @@ export async function savePendingBooking(bookingDetails: BookingFormData, token:
   try {
     const docRef = await addDoc(collection(db, PENDING_BOOKINGS_COLLECTION), {
       ...bookingDetails,
-      userId: userId || null, // Store the user ID or null if not logged in
+      userId: userId || null,
       dates: Timestamp.fromDate(bookingDetails.dates), // Store date as Firestore Timestamp
       status: 'pending',
       token: token,
-      createdAt: serverTimestamp(),
+      createdAt: firestoreServerTimestamp(), // Firestore serverTimestamp
       aiReason: aiReason || null,
     });
     console.log("Pending booking saved with ID: ", docRef.id);
@@ -77,7 +80,7 @@ export async function savePendingBooking(bookingDetails: BookingFormData, token:
 }
 
 /**
- * Retrieves a booking request by its authorization token.
+ * Retrieves a booking request by its authorization token from Firestore.
  * @param token - The authorization token.
  * @returns The booking request data or null if not found.
  */
@@ -91,20 +94,18 @@ export async function getBookingByToken(token: string): Promise<BookingRequest |
       return null;
     }
 
-    // Assuming token is unique, there should be only one document
     const docSnap = querySnapshot.docs[0];
     const data = docSnap.data();
 
-    // Convert Firestore Timestamp back to Date object if needed by frontend
     const bookingData: BookingRequest = {
       id: docSnap.id,
       studentId: data.studentId,
       hallPreference: data.hallPreference,
-      dates: (data.dates as Timestamp).toDate(), // Convert Timestamp to Date
+      dates: (data.dates as Timestamp).toDate(),
       status: data.status,
       token: data.token,
       createdAt: data.createdAt,
-      userId: data.userId, // Include userId
+      userId: data.userId,
       approvedAt: data.approvedAt,
       rejectedAt: data.rejectedAt,
       rejectionReason: data.rejectionReason,
@@ -119,7 +120,7 @@ export async function getBookingByToken(token: string): Promise<BookingRequest |
 }
 
 /**
- * Updates the status of a booking request by its Firestore document ID.
+ * Updates the status of a booking request in Firestore by its document ID.
  * @param bookingId - The Firestore document ID of the booking.
  * @param newStatus - The new status ('approved' or 'rejected').
  * @param rejectionReason - Optional reason if status is 'rejected'.
@@ -127,18 +128,18 @@ export async function getBookingByToken(token: string): Promise<BookingRequest |
 export async function updateBookingStatus(bookingId: string, newStatus: 'approved' | 'rejected', rejectionReason?: string): Promise<void> {
   try {
     const bookingRef = doc(db, PENDING_BOOKINGS_COLLECTION, bookingId);
-    const updateData: Partial<BookingRequest> = { // Use Partial for update data
+    const updateData: Partial<BookingRequest> = {
         status: newStatus,
     };
     if (newStatus === 'approved') {
-        updateData.approvedAt = serverTimestamp() as Timestamp;
-        updateData.rejectionReason = undefined; // Clear rejection reason if any, explicitly
-    } else { // 'rejected'
-        updateData.rejectedAt = serverTimestamp() as Timestamp;
+        updateData.approvedAt = firestoreServerTimestamp() as Timestamp;
+        updateData.rejectionReason = undefined;
+    } else {
+        updateData.rejectedAt = firestoreServerTimestamp() as Timestamp;
         updateData.rejectionReason = rejectionReason || "No reason provided.";
     }
 
-    await updateDoc(bookingRef, updateData as any); // Using 'as any' due to complex type with serverTimestamp and undefined
+    await updateDoc(bookingRef, updateData as any);
     console.log(`Booking ${bookingId} status updated to ${newStatus}`);
   } catch (e: any) {
     console.error("Error updating booking status: ", e);
@@ -148,7 +149,7 @@ export async function updateBookingStatus(bookingId: string, newStatus: 'approve
 
 
 /**
- * Retrieves a booking request by its Firestore document ID.
+ * Retrieves a booking request from Firestore by its document ID.
  * @param bookingId - The Firestore document ID of the booking.
  * @returns The booking request data or null if not found.
  */
@@ -167,7 +168,7 @@ export async function getBookingById(bookingId: string): Promise<BookingRequest 
         id: docSnap.id,
         studentId: data.studentId,
         hallPreference: data.hallPreference,
-        dates: (data.dates as Timestamp).toDate(), // Convert Timestamp to Date
+        dates: (data.dates as Timestamp).toDate(),
         status: data.status,
         token: data.token,
         createdAt: data.createdAt,
@@ -186,46 +187,50 @@ export async function getBookingById(bookingId: string): Promise<BookingRequest 
   }
 
 /**
- * Retrieves user profile data from Firestore.
+ * Retrieves user profile data from Firebase Realtime Database.
  * @param userId - The Firebase Authentication user ID.
  * @returns The user profile data or null if not found.
  */
 export async function getUserProfile(userId: string): Promise<UserProfileData | null> {
     try {
-        const userDocRef = doc(db, USERS_COLLECTION, userId);
-        const docSnap = await getDoc(userDocRef);
+        const userProfileRef = ref(realtimeDB, `${USERS_RTDB_PATH}/${userId}/profile`);
+        const snapshot = await getRealtimeDB(userProfileRef);
 
-        if (!docSnap.exists()) {
-            console.warn(`No user profile found for ID: ${userId}. This might be expected for new users.`);
+        if (!snapshot.exists()) {
+            console.warn(`No user profile found in Realtime Database for ID: ${userId}. This might be expected for new users.`);
             return null;
         }
 
-        const data = docSnap.data();
-        // Basic validation for expected fields
-        if (!data.name || !data.email || !data.department) {
-            console.error(`User profile data for ID ${userId} is incomplete:`, data);
-            // Decide if you want to throw an error or return partial data / null
-            // For now, returning null as the profile is considered invalid
-            return null;
+        const data = snapshot.val();
+        if (!data || !data.name || !data.email || !data.department) {
+            console.error(`User profile data from Realtime Database for ID ${userId} is incomplete or malformed:`, data);
+            throw new Error(`Incomplete user profile data retrieved for ID ${userId}.`);
         }
-
+        
+        // Convert RTDB timestamp (number) to Firestore Timestamp for consistency in UserProfileData if needed,
+        // or adjust UserProfileData to expect number for createdAt from RTDB.
+        // For now, we'll return it as number, assuming frontend can handle Timestamp or number.
         const userProfile: UserProfileData = {
             name: data.name,
             email: data.email,
             department: data.department,
-            createdAt: data.createdAt, // This will be undefined if not set, which is fine
+            createdAt: data.createdAt, // This will be a number (milliseconds since epoch)
         };
-         console.log("User profile found for ID:", userId, userProfile);
+        console.log("User profile found in Realtime Database for ID:", userId, userProfile);
         return userProfile;
 
     } catch (e: any) {
-        console.error(`Error getting user profile for ID ${userId}: `, e);
-        throw new Error(`Failed to retrieve user profile. Original error: ${e.message || 'Unknown Firestore error'}`);
+        console.error(`Error getting user profile from Realtime Database for ID ${userId}: `, e);
+        // Check if the error message already indicates it's one of our thrown errors.
+        if (e.message && (e.message.startsWith('Failed to retrieve user profile') || e.message.startsWith('Incomplete user profile data'))) {
+             throw e; // Re-throw the specific error
+        }
+        throw new Error(`Failed to retrieve user profile. Original error: ${e.message || 'Unknown Realtime Database error'}`);
     }
 }
 
 /**
- * Retrieves all booking requests for a specific user.
+ * Retrieves all booking requests for a specific user from Firestore.
  * @param userId - The ID of the user.
  * @returns An array of booking requests.
  */
@@ -234,7 +239,7 @@ export async function getUserBookings(userId: string): Promise<BookingRequest[]>
     const q = query(
       collection(db, PENDING_BOOKINGS_COLLECTION),
       where("userId", "==", userId),
-      orderBy("createdAt", "desc") // Order by creation date, newest first
+      orderBy("createdAt", "desc")
     );
     const querySnapshot = await getDocs(q);
 

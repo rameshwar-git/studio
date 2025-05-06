@@ -36,8 +36,8 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { auth } from '@/lib/firebase'; // Import Firebase auth instance
-import { saveUserProfile, type UserProfileData } from '@/services/firestore'; // Import Firestore service
+import { auth } from '@/lib/firebase';
+import { saveUserProfile } from '@/services/firestore'; // saveUserProfile now uses Realtime DB
 
 // Define available departments
 const departments = [
@@ -45,9 +45,8 @@ const departments = [
   'PGDM',
   'B.Tech',
   'MBA',
-  // 'MCA', // Removed duplicate MCA
   'LAW',
-  'Other', // Add an 'Other' option
+  'Other',
 ];
 
 const registrationFormSchema = z.object({
@@ -58,7 +57,7 @@ const registrationFormSchema = z.object({
   confirmPassword: z.string(),
 }).refine((data) => data.password === data.confirmPassword, {
   message: "Passwords don't match",
-  path: ["confirmPassword"], // path of error
+  path: ["confirmPassword"],
 });
 
 type RegistrationFormValues = z.infer<typeof registrationFormSchema>;
@@ -82,30 +81,28 @@ export default function RegistrationPage() {
   async function onSubmit(data: RegistrationFormValues) {
     setIsLoading(true);
     try {
-      // 1. Create user in Firebase Authentication
       const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
       const user = userCredential.user;
 
-      // 2. Save additional user profile data to Firestore
-      const userProfile: UserProfileData = {
+      // Save additional user profile data to Realtime Database
+      // Explicitly create an object without 'createdAt' for the saveUserProfile function
+      const userProfileToSave = {
         name: data.name,
         email: data.email,
         department: data.department,
       };
-      await saveUserProfile(user.uid, userProfile);
+      await saveUserProfile(user.uid, userProfileToSave);
 
       toast({
         title: 'Registration Successful',
         description: 'Your account has been created. Please log in.',
       });
 
-      // Redirect to the login page after successful registration
       router.push('/login');
 
     } catch (error: any) {
       console.error('Registration error:', error);
        let errorMessage = 'An unexpected error occurred during registration.';
-       // Map Firebase auth errors to user-friendly messages
        switch (error.code) {
          case 'auth/email-already-in-use':
            errorMessage = 'This email address is already registered. Please try logging in.';
@@ -119,20 +116,19 @@ export default function RegistrationPage() {
          case 'auth/network-request-failed':
               errorMessage = 'Network error. Please check your connection and try again.';
               break;
-         case 'auth/requests-to-this-api-identitytoolkit-method-google.cloud.identitytoolkit.v1.authenticationservice.signupnewuser-are-blocked': // Corrected error code for signup
+         case 'auth/requests-to-this-api-identitytoolkit-method-google.cloud.identitytoolkit.v1.identitytoolkitrequestservice.signupnewuser-are-blocked':
+         case 'auth/requests-to-this-api-identitytoolkit-method-google.cloud.identitytoolkit.v1.authenticationservice.signup-are-blocked': // Added this specific error code
               errorMessage = 'Registration is currently disabled. Please ensure "Identity Toolkit API" is enabled in your Google Cloud Project and "Email/Password" sign-in is enabled in Firebase Authentication settings.';
               break;
          case 'auth/api-key-not-valid':
               errorMessage = 'Firebase API Key is not valid. Please check your environment configuration.';
               break;
          default:
-            // Check if it's a Firestore error during profile saving
             if (error.message && error.message.includes('Failed to save user profile')) {
                 errorMessage = 'Account created, but failed to save profile details. Please contact support.';
             } else if (error.message && error.message.toLowerCase().includes("api key not valid")) {
                 errorMessage = 'Firebase API Key is not valid. Please check your environment configuration.';
             }
-            // Otherwise, use the default message
             break;
        }
 
@@ -283,4 +279,3 @@ export default function RegistrationPage() {
     </main>
   );
 }
-
