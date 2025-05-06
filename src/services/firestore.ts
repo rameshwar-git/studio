@@ -1,4 +1,3 @@
-
 'use server';
 /**
  * @fileOverview Firebase service functions for managing booking (Firestore) and user profile data (Realtime Database).
@@ -100,6 +99,17 @@ export async function savePendingBooking(bookingDetails: BookingFormData, token:
     };
     await setRealtimeDB(hallBookingRef, rtdbBookingData);
     console.log("Booking data also saved to Realtime Database under hallBookings/", bookingId);
+
+    //3. Also Save the User Bookings in Realtime Database
+    if (userId) {
+        const userBookingsRef = rtdbRef(realtimeDB, `${USERS_RTDB_PATH}/${userId}/bookings/${bookingId}`);
+        await setRealtimeDB(userBookingsRef, {
+            ...rtdbBookingData,
+            requestDate: realtimeServerTimestamp(),
+        });
+        console.log(`Booking information saved for user ${userId} under bookings/${bookingId}`);
+    }
+
 
     return bookingId;
   } catch (e: any) {
@@ -204,6 +214,31 @@ export async function updateBookingStatus(bookingId: string, newStatus: 'approve
         console.warn(`Booking ${bookingId} not found in Realtime Database for status update.`);
     }
 
+    // Also update user's booking status in RTDB
+    // Also update user's booking status in RTDB
+    // Also update user's booking status in RTDB
+    // Also update user's booking status in RTDB
+    // Also update user's booking status in RTDB
+    try {
+        // Also update user's booking status in RTDB
+        const bookingRef = rtdbRef(realtimeDB, `${USERS_RTDB_PATH}/${bookingDetails.userId}/bookings/${bookingId}`);
+        const snapshot = await getRealtimeDB(bookingRef);
+
+        if (snapshot.exists()) {
+            await setRealtimeDB(bookingRef, {
+                ...snapshot.val(),
+                status: newStatus,
+                rejectionReason: rejectionReason || null,
+                approvedAt: newStatus === 'approved' ? realtimeServerTimestamp() : null,
+                rejectedAt: newStatus === 'rejected' ? realtimeServerTimestamp() : null,
+            });
+            console.log(`User's booking status updated in RTDB for ${bookingId} to ${newStatus}`);
+        } else {
+            console.log(`User's booking not found in RTDB for ${bookingId}`);
+        }
+    } catch (e: any) {
+        console.error(`Failed to update user's booking status in RTDB for ${bookingId}: `, e);
+    }
   } catch (e: any) {
     console.error("Error updating booking status: ", e);
     throw new Error(`Failed to update booking status: ${e.message || 'Unknown error'}`);
@@ -252,24 +287,53 @@ export async function getUserProfile(userId: string): Promise<UserProfileData | 
 }
 
 export async function getUserBookings(userId: string): Promise<BookingRequest[]> {
-  try {
-    const q = query(
-      collection(db, PENDING_BOOKINGS_COLLECTION),
-      where("userId", "==", userId),
-      orderBy("createdAt", "desc")
-    );
-    const querySnapshot = await getDocs(q);
+   try {
+        const userBookingsRef = rtdbRef(realtimeDB, `${USERS_RTDB_PATH}/${userId}/bookings`);
+        const snapshot = await getRealtimeDB(userBookingsRef);
+        if (!snapshot.exists()) {
+            console.log(`No bookings found in RTDB for user ID: ${userId}.`);
+            return [];
+        }
 
-    const bookings: BookingRequest[] = querySnapshot.docs.map(mapDocToBookingRequest);
-    console.log(`Found ${bookings.length} bookings for user ID: ${userId}`);
-    return bookings;
-  } catch (e: any) {
-    console.error("Error getting user bookings: ", e);
-    // Instead of throwing, return an empty array and log the error.
-    // This allows the application to continue running even if there's a permission issue.
-    console.error("Error getting user bookings: ", e.message); 
-    return [];
-  }
+        const bookingsObj = snapshot.val();
+        if (!bookingsObj) {
+            return [];
+        }
+
+        const bookings: BookingRequest[] = Object.values(bookingsObj).map((booking: any) => {
+             let startTimeDate, endTimeDate, dateObj;
+
+            try {
+                 dateObj = parseISO(booking.date);
+                  const [startH, startM] = booking.startTime.split(':').map(Number);
+                  const [endH, endM] = booking.endTime.split(':').map(Number);
+
+                 startTimeDate = setMinutes(setHours(dateObj, startH), startM);
+                 endTimeDate = setMinutes(setHours(dateObj, endH), endM);
+             } catch (e) {
+                 console.error("Error parsing dates from RTDB booking data:", e);
+                // Handle or skip the booking that has parsing issues
+                 startTimeDate = new Date(); // or null if you prefer
+                 endTimeDate = new Date(); // or null
+                 dateObj = new Date(); // Or a default date value
+            }
+
+
+            return {
+                ...booking,
+                date: dateObj,
+                startTimeDate: startTimeDate,
+                endTimeDate: endTimeDate,
+            } as BookingRequest;
+        });
+
+        console.log(`Found ${bookings.length} bookings in RTDB for user ID: ${userId}`);
+        return bookings;
+    } catch (e: any) {
+        console.error(`Error getting user bookings from RTDB for ID ${userId}: `, e);
+        console.error("Error message: ", e.message);
+        return [];
+    }
 }
 
 
